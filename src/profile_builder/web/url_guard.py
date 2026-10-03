@@ -83,8 +83,11 @@ def normalize_url(url: str) -> str:
     path = re.sub(r"/{2,}", "/", parts.path) or "/"
     if len(path) > 1 and path.endswith("/"):
         path = path[:-1]
-    query_pairs = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
-                   if not TRACKING_PARAMS.match(k)]
+    query_pairs = [
+        (k, v)
+        for k, v in parse_qsl(parts.query, keep_blank_values=True)
+        if not TRACKING_PARAMS.match(k)
+    ]
     query = urlencode(sorted(query_pairs))
     return urlunsplit((scheme, netloc, path, query, ""))
 
@@ -114,7 +117,9 @@ def validate_url(url: str, *, resolver: Resolver | None = None, check_dns: bool 
         raise URLGuardError("invalid port") from exc
     if port is not None and port != DEFAULT_PORTS[scheme]:
         raise URLGuardError(f"non-default port {port} is not allowed")
-    if host in {"localhost", "localhost.localdomain", "ip6-localhost"} or host.endswith(".localhost"):
+    if host in {"localhost", "localhost.localdomain", "ip6-localhost"} or host.endswith(
+        ".localhost"
+    ):
         raise URLGuardError("localhost is not allowed")
     if host.endswith((".local", ".internal", ".lan", ".home", ".corp", ".localdomain")):
         raise URLGuardError(f"internal hostname {host!r} is not allowed")

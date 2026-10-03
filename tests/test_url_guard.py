@@ -15,15 +15,39 @@ from profile_builder.web.url_guard import (
 PUBLIC = ["93.184.216.34"]
 
 
-@pytest.mark.parametrize("url", [
-    "file:///etc/passwd", "ftp://example.com/x", "javascript:alert(1)", "http://localhost/",
-    "http://LOCALHOST:80/", "http://foo.localhost/", "http://intranet.local/", "http://127.0.0.1/",
-    "http://127.1/", "http://0.0.0.0/", "http://10.1.2.3/", "http://172.16.0.9/", "http://192.168.1.1/",
-    "http://169.254.169.254/latest/meta-data", "http://100.64.0.1/", "http://[::1]/", "http://[fe80::1]/",
-    "http://[fd00::1]/", "http://[::ffff:127.0.0.1]/", "http://2130706433/", "http://0x7f000001/",
-    "http://0177.0.0.1/", "http://user:pw@example.com/", "http://example.com:8080/", "https://example.com:8443/",
-    "", "http:///path", "http://" + "a" * 3000 + ".com/",
-])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///etc/passwd",
+        "ftp://example.com/x",
+        "javascript:alert(1)",
+        "http://localhost/",
+        "http://LOCALHOST:80/",
+        "http://foo.localhost/",
+        "http://intranet.local/",
+        "http://127.0.0.1/",
+        "http://127.1/",
+        "http://0.0.0.0/",
+        "http://10.1.2.3/",
+        "http://172.16.0.9/",
+        "http://192.168.1.1/",
+        "http://169.254.169.254/latest/meta-data",
+        "http://100.64.0.1/",
+        "http://[::1]/",
+        "http://[fe80::1]/",
+        "http://[fd00::1]/",
+        "http://[::ffff:127.0.0.1]/",
+        "http://2130706433/",
+        "http://0x7f000001/",
+        "http://0177.0.0.1/",
+        "http://user:pw@example.com/",
+        "http://example.com:8080/",
+        "https://example.com:8443/",
+        "",
+        "http:///path",
+        "http://" + "a" * 3000 + ".com/",
+    ],
+)
 def test_rejected(url):
     with pytest.raises(URLGuardError):
         validate_url(url, resolver=lambda h: PUBLIC)
@@ -37,10 +61,15 @@ def test_dns_rebinding_to_private_is_rejected():
 
 
 def test_public_allowed_and_normalized():
-    out = validate_url("HTTPS://Example.com:443/a//b/?utm_source=x&b=2&a=1#frag", resolver=lambda h: PUBLIC)
+    out = validate_url(
+        "HTTPS://Example.com:443/a//b/?utm_source=x&b=2&a=1#frag", resolver=lambda h: PUBLIC
+    )
     assert out == "https://example.com/a/b?a=1&b=2"
     assert validate_url("http://example.com", resolver=lambda h: PUBLIC) == "http://example.com/"
-    assert validate_url("https://93.184.216.34/x", resolver=lambda h: PUBLIC) == "https://93.184.216.34/x"
+    assert (
+        validate_url("https://93.184.216.34/x", resolver=lambda h: PUBLIC)
+        == "https://93.184.216.34/x"
+    )
 
 
 def test_normalize_dedupes_variants():

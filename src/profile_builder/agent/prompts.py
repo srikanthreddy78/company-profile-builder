@@ -74,9 +74,7 @@ PRODUCT_FOCUS_OPEN = (
 
 def render_system_prompt(*, max_pages: int, max_questions: int, product_focus: str | None) -> str:
     block = (
-        PRODUCT_FOCUS_PRESET.format(product=product_focus)
-        if product_focus
-        else PRODUCT_FOCUS_OPEN
+        PRODUCT_FOCUS_PRESET.format(product=product_focus) if product_focus else PRODUCT_FOCUS_OPEN
     )
     return SYSTEM_PROMPT_TEMPLATE.format(
         max_pages=max_pages,
@@ -86,7 +84,9 @@ def render_system_prompt(*, max_pages: int, max_questions: int, product_focus: s
     )
 
 
-def render_initial_message(*, start_url: str, product_focus: str | None, max_pages: int, max_questions: int) -> str:
+def render_initial_message(
+    *, start_url: str, product_focus: str | None, max_pages: int, max_questions: int
+) -> str:
     lines = [
         f"Build the company profile for {start_url}.",
         f"Limits for this run: {max_pages} pages, {max_questions} interview questions.",

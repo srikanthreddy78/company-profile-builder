@@ -31,7 +31,7 @@ from profile_builder.config import (
     Settings,
 )
 from profile_builder.logging_setup import event, get_logger, set_run_context
-from profile_builder.retrieval.chunking import chunk_markdown, text_hash
+from profile_builder.retrieval.chunking import text_hash
 from profile_builder.retrieval.index import HybridIndex
 from profile_builder.schema import (
     CompanyBrain,
@@ -63,7 +63,19 @@ from profile_builder.workflow.gaps import grounding_report, prioritize_for_inter
 log = get_logger("tools")
 
 SKIP_WORDS = frozenset({"skip", "s", "pass", "next"})
-UNKNOWN_WORDS = frozenset({"idk", "i don't know", "i dont know", "dont know", "don't know", "unknown", "not sure", "no idea", "?"})
+UNKNOWN_WORDS = frozenset(
+    {
+        "idk",
+        "i don't know",
+        "i dont know",
+        "dont know",
+        "don't know",
+        "unknown",
+        "not sure",
+        "no idea",
+        "?",
+    }
+)
 QUESTION_KINDS = ("product_selection", "gap", "conflict", "brand")
 STAGES = ("discover", "scrape", "research", "draft", "interview", "finalize", "done")
 
@@ -157,11 +169,41 @@ def process_page(ctx: ToolContext, page: ScrapedPage, requested_url: str) -> dic
     try:
         final_norm = validate_url(final_url, check_dns=ctx.check_dns)
     except URLGuardError as exc:
-        ctx.store.upsert_page(PageRecord(url, final_url, "failed", page.http_status, page.title, None, 0, None, "REDIRECT_REJECTED", str(exc), True, time.time()))
+        ctx.store.upsert_page(
+            PageRecord(
+                url,
+                final_url,
+                "failed",
+                page.http_status,
+                page.title,
+                None,
+                0,
+                None,
+                "REDIRECT_REJECTED",
+                str(exc),
+                True,
+                time.time(),
+            )
+        )
         ctx.warn("REDIRECT_REJECTED", f"{url} redirected to a disallowed destination: {exc}")
         return {"url": url, "status": "rejected", "error": f"redirect target rejected: {exc}"}
     if not same_site(final_norm, ctx.start_url):
-        ctx.store.upsert_page(PageRecord(url, final_norm, "failed", page.http_status, page.title, None, 0, None, "REDIRECT_OFFSITE", "redirected off-site", True, time.time()))
+        ctx.store.upsert_page(
+            PageRecord(
+                url,
+                final_norm,
+                "failed",
+                page.http_status,
+                page.title,
+                None,
+                0,
+                None,
+                "REDIRECT_OFFSITE",
+                "redirected off-site",
+                True,
+                time.time(),
+            )
+        )
         ctx.warn("REDIRECT_OFFSITE", f"{url} redirected off-site to {final_norm}; skipped")
         return {"url": url, "status": "rejected", "error": "redirected off-site"}
 
@@ -171,34 +213,99 @@ def process_page(ctx: ToolContext, page: ScrapedPage, requested_url: str) -> dic
         markdown = markdown[:MAX_PAGE_CHARS]
         truncated = True
     if len(markdown) < 80:
-        ctx.store.upsert_page(PageRecord(url, final_norm, "skipped", page.http_status, page.title, None, len(markdown), None, "EMPTY_CONTENT", "page had no usable text", True, time.time()))
+        ctx.store.upsert_page(
+            PageRecord(
+                url,
+                final_norm,
+                "skipped",
+                page.http_status,
+                page.title,
+                None,
+                len(markdown),
+                None,
+                "EMPTY_CONTENT",
+                "page had no usable text",
+                True,
+                time.time(),
+            )
+        )
         ctx.warn("EMPTY_CONTENT", f"{url} returned no usable text; skipped")
         return {"url": url, "status": "skipped", "error": "empty content"}
 
     content_hash = text_hash(markdown)
     duplicate_of = ctx.store.content_hash_exists(content_hash, other_than=url)
     if duplicate_of:
-        ctx.store.upsert_page(PageRecord(url, final_norm, "skipped", page.http_status, page.title, content_hash, len(markdown), None, "DUPLICATE_CONTENT", f"same content as {duplicate_of}", True, time.time()))
+        ctx.store.upsert_page(
+            PageRecord(
+                url,
+                final_norm,
+                "skipped",
+                page.http_status,
+                page.title,
+                content_hash,
+                len(markdown),
+                None,
+                "DUPLICATE_CONTENT",
+                f"same content as {duplicate_of}",
+                True,
+                time.time(),
+            )
+        )
         ctx.warn("DUPLICATE_CONTENT", f"{url} has the same content as {duplicate_of}; skipped")
         return {"url": url, "status": "duplicate", "duplicate_of": duplicate_of}
 
     hits = detect_injection(markdown)
     if hits:
-        ctx.warn("INJECTION_SUSPECTED", f"{url} contains instruction-like text; treated as data only", patterns=hits[:3])
+        ctx.warn(
+            "INJECTION_SUSPECTED",
+            f"{url} contains instruction-like text; treated as data only",
+            patterns=hits[:3],
+        )
 
     cache_name = url_cache_name(url)
-    stored = ScrapedPage(url=url, final_url=final_norm, title=page.title, description=page.description, markdown=markdown, http_status=page.http_status, links=[])
+    stored = ScrapedPage(
+        url=url,
+        final_url=final_norm,
+        title=page.title,
+        description=page.description,
+        markdown=markdown,
+        http_status=page.http_status,
+        links=[],
+    )
     atomic_write_text(ctx.pages_dir / cache_name, stored.to_json())
     ctx._page_text_cache[url] = markdown
 
-    chunks = chunk_markdown(markdown, page_title=page.title)
-    kept, dropped = ctx.index.index_page(url, chunks)
-    ctx.store.upsert_page(PageRecord(url, final_norm, "fetched", page.http_status, page.title, content_hash, len(markdown), cache_name, None, None, True, time.time()))
+    kept, dropped = ctx.index.index_page(url, markdown, title=page.title)
+    ctx.store.upsert_page(
+        PageRecord(
+            url,
+            final_norm,
+            "fetched",
+            page.http_status,
+            page.title,
+            content_hash,
+            len(markdown),
+            cache_name,
+            None,
+            None,
+            True,
+            time.time(),
+        )
+    )
     if truncated:
-        ctx.warn("PAGE_TRUNCATED", f"{url} was longer than {MAX_PAGE_CHARS} chars and was truncated")
-    event(log, "page_fetch", f"indexed {url} ({len(markdown)} chars, {kept} chunks, {dropped} duplicate chunks dropped)", url=url, status="cached" if page.cached else "fetched", count=kept)
+        ctx.warn(
+            "PAGE_TRUNCATED", f"{url} was longer than {MAX_PAGE_CHARS} chars and was truncated"
+        )
+    event(
+        log,
+        "page_fetch",
+        f"indexed {url} ({len(markdown)} chars, {kept} chunks, {dropped} repeated blocks dropped)",
+        url=url,
+        status="cached" if page.cached else "fetched",
+        count=kept,
+    )
     headings = ctx.index.page_outline(url, PAGE_HEADINGS_TO_MODEL)
-    lead = " ".join(markdown[:PAGE_LEAD_CHARS * 2].split())[:PAGE_LEAD_CHARS]
+    lead = " ".join(markdown[: PAGE_LEAD_CHARS * 2].split())[:PAGE_LEAD_CHARS]
     return {
         "url": url,
         "status": "cached" if page.cached else "fetched",
@@ -235,22 +342,45 @@ def make_tools(ctx: ToolContext) -> list[Any]:
             return _json({"ok": False, "error": "discover_pages only works on the run's website"})
         if not ctx.robots.allowed(url):
             ctx.warn("ROBOTS_DISALLOWED", f"robots.txt disallows fetching {url}")
-            return _json({"ok": False, "error": "robots.txt disallows the homepage; no pages can be fetched"})
-        result = discover(url, ctx.scraper, timeout_ms=settings.scrape_timeout_ms, check_dns=ctx.check_dns)
+            return _json(
+                {"ok": False, "error": "robots.txt disallows the homepage; no pages can be fetched"}
+            )
+        result = discover(
+            url, ctx.scraper, timeout_ms=settings.scrape_timeout_ms, check_dns=ctx.check_dns
+        )
         for note in result.notes:
             ctx.warn("DISCOVERY_NOTE", note)
         if result.homepage is not None and ctx.page_budget_remaining() > 0:
             process_page(ctx, result.homepage, url)
-        event(log, "pages_discovered", f"{len(result.candidates)} candidates from {result.source} ({result.dropped} dropped)", count=len(result.candidates), kind=result.source)
-        atomic_write_text(ctx.run_dir / DISCOVERY_FILENAME, _json([{"url": c.url, "title": c.title, "description": c.description} for c in result.candidates]))
-        return _json({
-            "ok": True,
-            "source": result.source,
-            "candidates": [{"url": c.url, "title": c.title, "description": c.description, "score": c.score} for c in result.candidates],
-            "already_fetched": sorted(store.fetched_urls()),
-            "page_budget_remaining": ctx.page_budget_remaining(),
-            "notes": result.notes,
-        })
+        event(
+            log,
+            "pages_discovered",
+            f"{len(result.candidates)} candidates from {result.source} ({result.dropped} dropped)",
+            count=len(result.candidates),
+            kind=result.source,
+        )
+        atomic_write_text(
+            ctx.run_dir / DISCOVERY_FILENAME,
+            _json(
+                [
+                    {"url": c.url, "title": c.title, "description": c.description}
+                    for c in result.candidates
+                ]
+            ),
+        )
+        return _json(
+            {
+                "ok": True,
+                "source": result.source,
+                "candidates": [
+                    {"url": c.url, "title": c.title, "description": c.description, "score": c.score}
+                    for c in result.candidates
+                ],
+                "already_fetched": sorted(store.fetched_urls()),
+                "page_budget_remaining": ctx.page_budget_remaining(),
+                "notes": result.notes,
+            }
+        )
 
     # ---- scraping ------------------------------------------------------------------
     @tool
@@ -273,23 +403,59 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                 continue
             seen.add(url)
             if not same_site(url, ctx.start_url):
-                results.append({"url": url, "status": "rejected", "error": "not on the company's website"})
+                results.append(
+                    {"url": url, "status": "rejected", "error": "not on the company's website"}
+                )
                 continue
             existing = store.get_page(url)
             if existing and existing.status == "fetched":
-                results.append({"url": url, "status": "already_fetched", "title": existing.title, "chars": existing.char_count, "headings": ctx.index.page_outline(url, PAGE_HEADINGS_TO_MODEL)})
+                results.append(
+                    {
+                        "url": url,
+                        "status": "already_fetched",
+                        "title": existing.title,
+                        "chars": existing.char_count,
+                        "headings": ctx.index.page_outline(url, PAGE_HEADINGS_TO_MODEL),
+                    }
+                )
                 continue
             if existing and existing.status == "skipped":
                 results.append({"url": url, "status": "skipped", "error": existing.error})
                 continue
             if ctx.page_budget_remaining() <= 0:
                 if not store.has_warning("LIMIT_PAGES_REACHED"):
-                    ctx.warn("LIMIT_PAGES_REACHED", f"page limit of {settings.max_pages} reached; further pages were not fetched")
-                    event(log, "limit_reached", "page limit reached", kind="pages", count=settings.max_pages)
-                results.append({"url": url, "status": "not_fetched", "error": "page budget exhausted"})
+                    ctx.warn(
+                        "LIMIT_PAGES_REACHED",
+                        f"page limit of {settings.max_pages} reached; further pages were not fetched",
+                    )
+                    event(
+                        log,
+                        "limit_reached",
+                        "page limit reached",
+                        kind="pages",
+                        count=settings.max_pages,
+                    )
+                results.append(
+                    {"url": url, "status": "not_fetched", "error": "page budget exhausted"}
+                )
                 continue
             if not ctx.robots.allowed(url):
-                store.upsert_page(PageRecord(url, None, "skipped", None, None, None, 0, None, "ROBOTS_DISALLOWED", "robots.txt disallows", True, time.time()))
+                store.upsert_page(
+                    PageRecord(
+                        url,
+                        None,
+                        "skipped",
+                        None,
+                        None,
+                        None,
+                        0,
+                        None,
+                        "ROBOTS_DISALLOWED",
+                        "robots.txt disallows",
+                        True,
+                        time.time(),
+                    )
+                )
                 ctx.warn("ROBOTS_DISALLOWED", f"robots.txt disallows fetching {url}; skipped")
                 results.append({"url": url, "status": "skipped", "error": "robots.txt disallows"})
                 continue
@@ -299,21 +465,61 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                     page = ctx.scraper.scrape(url, timeout_ms=settings.scrape_timeout_ms)
                 except TransientScrapeError as exc:
                     # Record the attempt, then let the retry middleware retry the whole call.
-                    store.upsert_page(PageRecord(url, None, "failed", None, None, None, 0, None, exc.code, str(exc), True, time.time()))
-                    event(log, "page_fetch", f"{url} transient failure: {exc}", level=logging.WARNING, url=url, status="transient", code=exc.code)
+                    store.upsert_page(
+                        PageRecord(
+                            url,
+                            None,
+                            "failed",
+                            None,
+                            None,
+                            None,
+                            0,
+                            None,
+                            exc.code,
+                            str(exc),
+                            True,
+                            time.time(),
+                        )
+                    )
+                    event(
+                        log,
+                        "page_fetch",
+                        f"{url} transient failure: {exc}",
+                        level=logging.WARNING,
+                        url=url,
+                        status="transient",
+                        code=exc.code,
+                    )
                     raise
                 except PermanentScrapeError as exc:
-                    store.upsert_page(PageRecord(url, None, "failed", exc.http_status, None, None, 0, None, exc.code, str(exc), True, time.time()))
+                    store.upsert_page(
+                        PageRecord(
+                            url,
+                            None,
+                            "failed",
+                            exc.http_status,
+                            None,
+                            None,
+                            0,
+                            None,
+                            exc.code,
+                            str(exc),
+                            True,
+                            time.time(),
+                        )
+                    )
                     ctx.warn(f"PAGE_SKIPPED_{exc.code}", f"{url} skipped: {exc}")
                     results.append({"url": url, "status": "failed", "error": str(exc)})
                     continue
             results.append(process_page(ctx, page, url))
-        return _json({
-            "ok": True,
-            "results": results,
-            "pages_fetched": len(store.fetched_urls()),
-            "page_budget_remaining": ctx.page_budget_remaining(),
-        })
+        return _json(
+            {
+                "ok": True,
+                "results": results,
+                "pages_fetched": len(store.fetched_urls()),
+                "page_budget_remaining": ctx.page_budget_remaining(),
+            }
+        )
 
     # ---- retrieval -----------------------------------------------------------------
     @tool
@@ -330,8 +536,23 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                 return _json({"ok": False, "error": str(exc)})
         hits = ctx.index.search(query, url=target)
         if not hits:
-            return _json({"ok": True, "query": query, "results": [], "note": "no indexed content matched; scrape pages first or broaden the query"})
-        return _json({"ok": True, "query": query, "results": [{"url": h.url, "heading": h.heading, "excerpt": h.excerpt} for h in hits]})
+            return _json(
+                {
+                    "ok": True,
+                    "query": query,
+                    "results": [],
+                    "note": "no indexed content matched; scrape pages first or broaden the query",
+                }
+            )
+        return _json(
+            {
+                "ok": True,
+                "query": query,
+                "results": [
+                    {"url": h.url, "heading": h.heading, "excerpt": h.excerpt} for h in hits
+                ],
+            }
+        )
 
     @tool
     def read_page(url: str, section: str | None = None, offset: int = 0) -> str:
@@ -344,9 +565,27 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         except URLGuardError as exc:
             return _json({"ok": False, "error": str(exc)})
         if target not in store.fetched_urls():
-            return _json({"ok": False, "error": "page not fetched; call scrape_pages first", "fetched": sorted(store.fetched_urls())})
-        text, more, next_offset = ctx.index.read(target, section=section, offset=max(0, int(offset or 0)))
-        return _json({"ok": True, "url": target, "section": section, "text": text, "more_available": more, "next_offset": next_offset, "outline": ctx.index.page_outline(target, PAGE_HEADINGS_TO_MODEL)})
+            return _json(
+                {
+                    "ok": False,
+                    "error": "page not fetched; call scrape_pages first",
+                    "fetched": sorted(store.fetched_urls()),
+                }
+            )
+        text, more, next_offset = ctx.index.read(
+            target, section=section, offset=max(0, int(offset or 0))
+        )
+        return _json(
+            {
+                "ok": True,
+                "url": target,
+                "section": section,
+                "text": text,
+                "more_available": more,
+                "next_offset": next_offset,
+                "outline": ctx.index.page_outline(target, PAGE_HEADINGS_TO_MODEL),
+            }
+        )
 
     # ---- interview -----------------------------------------------------------------
     @tool
@@ -362,38 +601,81 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         except FieldPathError as exc:
             return _json({"ok": False, "error": f"invalid field path: {exc}"})
         if not paths and kind != "product_selection":
-            return _json({"ok": False, "error": "field_paths must name at least one contract field"})
+            return _json(
+                {"ok": False, "error": "field_paths must name at least one contract field"}
+            )
         normalized_q = " ".join((question or "").split()).lower()
-        qid = hashlib.sha1(f"{ctx.run_id}|{kind}|{','.join(sorted(paths))}|{normalized_q}".encode(), usedforsecurity=False).hexdigest()[:12]
+        qid = hashlib.sha1(
+            f"{ctx.run_id}|{kind}|{','.join(sorted(paths))}|{normalized_q}".encode(),
+            usedforsecurity=False,
+        ).hexdigest()[:12]
 
         existing = store.get_question(qid)
         if existing and existing["status"] != "pending":
             # Replay after a crash: the answer is already committed; never re-ask.
-            return _json({"ok": True, "qid": qid, "status": existing["status"], "answer": existing["answer"], "questions_remaining": max(0, settings.max_questions - store.questions_asked()), "note": "answer already recorded"})
+            return _json(
+                {
+                    "ok": True,
+                    "qid": qid,
+                    "status": existing["status"],
+                    "answer": existing["answer"],
+                    "questions_remaining": max(0, settings.max_questions - store.questions_asked()),
+                    "note": "answer already recorded",
+                }
+            )
         if store.questions_asked() >= settings.max_questions:
             if not store.has_warning("LIMIT_QUESTIONS_REACHED"):
-                ctx.warn("LIMIT_QUESTIONS_REACHED", f"question limit of {settings.max_questions} reached")
-                event(log, "limit_reached", "question limit reached", kind="questions", count=settings.max_questions)
-            return _json({"ok": False, "error": "question limit reached; finalize the profile with the evidence you have"})
+                ctx.warn(
+                    "LIMIT_QUESTIONS_REACHED", f"question limit of {settings.max_questions} reached"
+                )
+                event(
+                    log,
+                    "limit_reached",
+                    "question limit reached",
+                    kind="questions",
+                    count=settings.max_questions,
+                )
+            return _json(
+                {
+                    "ok": False,
+                    "error": "question limit reached; finalize the profile with the evidence you have",
+                }
+            )
 
         if kind == "product_selection" and ctx.product_focus:
             store.upsert_question(qid, kind, question, why_unclear, paths)
             store.answer_question(qid, "answered", ctx.product_focus)
-            return _json({"ok": True, "qid": qid, "status": "answered", "answer": ctx.product_focus, "note": "product focus was preset on the command line"})
+            return _json(
+                {
+                    "ok": True,
+                    "qid": qid,
+                    "status": "answered",
+                    "answer": ctx.product_focus,
+                    "note": "product focus was preset on the command line",
+                }
+            )
 
         record = store.upsert_question(qid, kind, question, why_unclear, paths)
         ctx.set_stage("interview")
-        event(log, "interrupt_raised", f"asking user (q{record['ordinal']}): {question[:120]}", qid=qid, count=record["ordinal"])
+        event(
+            log,
+            "interrupt_raised",
+            f"asking user (q{record['ordinal']}): {question[:120]}",
+            qid=qid,
+            count=record["ordinal"],
+        )
         # --- interrupt: everything above is idempotent and re-runs safely on resume ---
-        raw = interrupt({
-            "qid": qid,
-            "question": question,
-            "why_unclear": why_unclear,
-            "field_paths": paths,
-            "kind": kind,
-            "number": record["ordinal"],
-            "max": settings.max_questions,
-        })
+        raw = interrupt(
+            {
+                "qid": qid,
+                "question": question,
+                "why_unclear": why_unclear,
+                "field_paths": paths,
+                "kind": kind,
+                "number": record["ordinal"],
+                "max": settings.max_questions,
+            }
+        )
         answer = sanitize_answer(str(raw if raw is not None else ""))
         lowered = answer.lower().strip(" .!")
         if not answer or lowered in SKIP_WORDS:
@@ -409,10 +691,20 @@ def make_tools(ctx: ToolContext) -> list[Any]:
             store.set_product_focus(stored_answer or "")
         remaining = max(0, settings.max_questions - store.questions_asked())
         result_answer = stored_answer if status == "answered" else status.upper()
-        return _json({"ok": True, "qid": qid, "status": status, "answer": result_answer, "questions_remaining": remaining})
+        return _json(
+            {
+                "ok": True,
+                "qid": qid,
+                "status": status,
+                "answer": result_answer,
+                "questions_remaining": remaining,
+            }
+        )
 
     # ---- drafting ------------------------------------------------------------------
-    def _verify_website_evidence(profile: dict[str, Any], items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    def _verify_website_evidence(
+        profile: dict[str, Any], items: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         accepted: list[dict[str, Any]] = []
         rejected: list[dict[str, Any]] = []
         fetched = store.fetched_urls()
@@ -434,28 +726,62 @@ def make_tools(ctx: ToolContext) -> list[Any]:
             except ValueError:
                 src_norm = ""
             if src_norm not in fetched:
-                rejected.append({"field_path": path, "reason": "source_url is not a page fetched in this run"})
+                rejected.append(
+                    {"field_path": path, "reason": "source_url is not a page fetched in this run"}
+                )
                 continue
             page_text = ctx.page_text(src_norm) or ""
             if not excerpt_in_page(excerpt, page_text):
-                rejected.append({"field_path": path, "reason": "excerpt is not a verbatim quote from that page"})
+                rejected.append(
+                    {"field_path": path, "reason": "excerpt is not a verbatim quote from that page"}
+                )
                 continue
             accepted.append({"field_path": path, "source_url": src_norm, "excerpt": excerpt})
         return accepted, rejected
 
     def _repair_or_fail(errors: list[str], what: str) -> str:
         attempts = store.increment_counter("repair_attempts")
-        event(log, "repair_attempt", f"{what} invalid (attempt {attempts})", level=logging.WARNING, attempt=attempts, count=len(errors))
+        event(
+            log,
+            "repair_attempt",
+            f"{what} invalid (attempt {attempts})",
+            level=logging.WARNING,
+            attempt=attempts,
+            count=len(errors),
+        )
         if attempts > MAX_REPAIR_ATTEMPTS:
-            ctx.warn("INVALID_MODEL_OUTPUT", f"{what} was still invalid after {MAX_REPAIR_ATTEMPTS} repair attempt(s)")
+            ctx.warn(
+                "INVALID_MODEL_OUTPUT",
+                f"{what} was still invalid after {MAX_REPAIR_ATTEMPTS} repair attempt(s)",
+            )
             raise FatalProfileError(f"{what} failed validation twice: {'; '.join(errors[:5])}")
-        return _json({"ok": False, "errors": errors, "repair_attempts_remaining": MAX_REPAIR_ATTEMPTS - attempts + 1, "hint": "fix the listed fields and call again with the full corrected input"})
+        return _json(
+            {
+                "ok": False,
+                "errors": errors,
+                "repair_attempts_remaining": MAX_REPAIR_ATTEMPTS - attempts + 1,
+                "hint": "fix the listed fields and call again with the full corrected input",
+            }
+        )
 
     def _gap_payload(profile: dict[str, Any]) -> dict[str, Any]:
         asked = {p for q in store.list_questions() for p in q["field_paths"]}
         grounding = grounding_report(profile, evidence_paths(store))
-        gaps = prioritize_for_interview(profile, open_conflicts=store.list_conflicts("open"), asked_paths=asked, ungrounded=grounding["ungrounded"])
-        return {"grounding": {"grounded": grounding["grounded"], "populated": grounding["populated"], "ungrounded": grounding["ungrounded"][:10]}, "gaps": gaps, "questions_remaining": max(0, settings.max_questions - store.questions_asked())}
+        gaps = prioritize_for_interview(
+            profile,
+            open_conflicts=store.list_conflicts("open"),
+            asked_paths=asked,
+            ungrounded=grounding["ungrounded"],
+        )
+        return {
+            "grounding": {
+                "grounded": grounding["grounded"],
+                "populated": grounding["populated"],
+                "ungrounded": grounding["ungrounded"][:10],
+            },
+            "gaps": gaps,
+            "questions_remaining": max(0, settings.max_questions - store.questions_asked()),
+        }
 
     @tool
     def save_profile_draft(profile: dict[str, Any], evidence: list[dict[str, Any]]) -> str:
@@ -479,8 +805,23 @@ def make_tools(ctx: ToolContext) -> list[Any]:
             ctx.warn("EVIDENCE_REJECTED", f"{r['field_path']}: {r['reason']}")
         version = store.save_draft(clean, "draft")
         payload = _gap_payload(clean)
-        event(log, "draft_saved", f"draft v{version} saved ({len(accepted)} evidence rows, {len(rejected)} rejected, {len(payload['gaps'])} gaps)", version=version, count=len(payload["gaps"]))
-        return _json({"ok": True, "version": version, "evidence_accepted": len(accepted), "evidence_rejected": rejected, **payload, "next": "ask focused questions for the top gaps/conflicts, or finalize_profile if none are worth asking"})
+        event(
+            log,
+            "draft_saved",
+            f"draft v{version} saved ({len(accepted)} evidence rows, {len(rejected)} rejected, {len(payload['gaps'])} gaps)",
+            version=version,
+            count=len(payload["gaps"]),
+        )
+        return _json(
+            {
+                "ok": True,
+                "version": version,
+                "evidence_accepted": len(accepted),
+                "evidence_rejected": rejected,
+                **payload,
+                "next": "ask focused questions for the top gaps/conflicts, or finalize_profile if none are worth asking",
+            }
+        )
 
     @tool
     def apply_profile_updates(updates: list[dict[str, Any]]) -> str:
@@ -511,12 +852,19 @@ def make_tools(ctx: ToolContext) -> list[Any]:
             if kind == "interview":
                 q = store.get_question(str(ev.get("question_id", "")))
                 if not q or q["status"] != "answered":
-                    rejected.append({"field_path": path, "reason": "evidence must reference an answered question id"})
+                    rejected.append(
+                        {
+                            "field_path": path,
+                            "reason": "evidence must reference an answered question id",
+                        }
+                    )
                     continue
             elif kind == "website":
                 pass  # verified after the value is set (it must be non-empty)
             else:
-                rejected.append({"field_path": path, "reason": "evidence.kind must be 'interview' or 'website'"})
+                rejected.append(
+                    {"field_path": path, "reason": "evidence.kind must be 'interview' or 'website'"}
+                )
                 continue
             old = get_by_path(data, path)
             try:
@@ -525,14 +873,32 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                 rejected.append({"field_path": path, "reason": str(exc)})
                 continue
             if kind == "website":
-                acc, rej = _verify_website_evidence(data, [{"field_path": path, "source_url": ev.get("source_url"), "excerpt": ev.get("excerpt")}])
+                acc, rej = _verify_website_evidence(
+                    data,
+                    [
+                        {
+                            "field_path": path,
+                            "source_url": ev.get("source_url"),
+                            "excerpt": ev.get("excerpt"),
+                        }
+                    ],
+                )
                 if rej:
                     set_by_path(data, path, old)
                     rejected.append(rej[0])
                     continue
                 pending_evidence.append({"kind": "website", **acc[0]})
             else:
-                pending_evidence.append({"kind": "interview", "field_path": path, "question_id": q["qid"], "answer": q["answer"], "old": old, "value": upd.get("value")})
+                pending_evidence.append(
+                    {
+                        "kind": "interview",
+                        "field_path": path,
+                        "question_id": q["qid"],
+                        "answer": q["answer"],
+                        "old": old,
+                        "value": upd.get("value"),
+                    }
+                )
             applied.append(path)
         if not applied:
             return _json({"ok": False, "applied": [], "rejected": rejected, **_gap_payload(data)})
@@ -543,22 +909,42 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         clean = brain.model_dump(mode="json")
         for ev in pending_evidence:
             if ev["kind"] == "website":
-                store.add_evidence(ev["field_path"], "website", source_url=ev["source_url"], excerpt=ev["excerpt"])
+                store.add_evidence(
+                    ev["field_path"], "website", source_url=ev["source_url"], excerpt=ev["excerpt"]
+                )
             else:
                 old, value = ev["old"], ev["value"]
                 superseded = 0
                 if old not in ("", [], None) and old != value:
                     superseded = store.supersede_evidence(ev["field_path"], "website")
                     if superseded:
-                        ctx.warn("USER_CORRECTION_SUPERSEDES_SITE", f"{ev['field_path']}: user answer replaced the website claim (original evidence preserved)")
-                store.add_evidence(ev["field_path"], "interview", question_id=ev["question_id"], answer=ev["answer"])
+                        ctx.warn(
+                            "USER_CORRECTION_SUPERSEDES_SITE",
+                            f"{ev['field_path']}: user answer replaced the website claim (original evidence preserved)",
+                        )
+                store.add_evidence(
+                    ev["field_path"],
+                    "interview",
+                    question_id=ev["question_id"],
+                    answer=ev["answer"],
+                )
                 for c in store.list_conflicts("open"):
                     if c["field_path"] == ev["field_path"]:
-                        store.resolve_conflict(c["field_path"], f"user answer (q {ev['question_id']}): {ev['answer']}")
+                        store.resolve_conflict(
+                            c["field_path"], f"user answer (q {ev['question_id']}): {ev['answer']}"
+                        )
         version = store.save_draft(clean, "update")
         payload = _gap_payload(clean)
-        event(log, "draft_saved", f"draft v{version} updated ({len(applied)} fields)", version=version, count=len(applied))
-        return _json({"ok": True, "version": version, "applied": applied, "rejected": rejected, **payload})
+        event(
+            log,
+            "draft_saved",
+            f"draft v{version} updated ({len(applied)} fields)",
+            version=version,
+            count=len(applied),
+        )
+        return _json(
+            {"ok": True, "version": version, "applied": applied, "rejected": rejected, **payload}
+        )
 
     @tool
     def note_conflict(field_path: str, claims: list[dict[str, Any]], summary: str) -> str:
@@ -580,13 +966,31 @@ def make_tools(ctx: ToolContext) -> list[Any]:
             text = ctx.page_text(src) if src in fetched else None
             if text is None or not excerpt_in_page(str(c.get("excerpt", "")), text):
                 continue
-            verified.append({"source_url": src, "excerpt": str(c.get("excerpt", "")), "claim": str(c.get("claim", ""))})
+            verified.append(
+                {
+                    "source_url": src,
+                    "excerpt": str(c.get("excerpt", "")),
+                    "claim": str(c.get("claim", "")),
+                }
+            )
         if len(verified) < 2:
-            return _json({"ok": False, "error": "a conflict needs at least two verifiable claims from fetched pages"})
+            return _json(
+                {
+                    "ok": False,
+                    "error": "a conflict needs at least two verifiable claims from fetched pages",
+                }
+            )
         store.upsert_conflict(field_path.strip(), verified, summary)
         ctx.warn("CONFLICT_RECORDED", f"{field_path}: {summary}")
         event(log, "conflict_noted", f"conflict on {field_path}", code=field_path)
-        return _json({"ok": True, "field_path": field_path, "claims": len(verified), "next": "ask the user a targeted question with kind='conflict' if this affects the profile"})
+        return _json(
+            {
+                "ok": True,
+                "field_path": field_path,
+                "claims": len(verified),
+                "next": "ask the user a targeted question with kind='conflict' if this affects the profile",
+            }
+        )
 
     # ---- finalize ------------------------------------------------------------------
     @tool
@@ -598,7 +1002,17 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         ctx.set_stage("done")
         return _json(result)
 
-    return [discover_pages, scrape_pages, search_pages, read_page, ask_user, save_profile_draft, apply_profile_updates, note_conflict, finalize_profile]
+    return [
+        discover_pages,
+        scrape_pages,
+        search_pages,
+        read_page,
+        ask_user,
+        save_profile_draft,
+        apply_profile_updates,
+        note_conflict,
+        finalize_profile,
+    ]
 
 
 # --------------------------------------------------------------------------------------
@@ -633,15 +1047,32 @@ def finalize(ctx: ToolContext, *, forced_partial: bool = False) -> dict[str, Any
             set_by_path(data, path, [])
         else:
             set_by_path(data, path, "")
-        ctx.warn("CONFLICT_UNRESOLVED_OMITTED", f"{path}: conflicting evidence was not resolved; value omitted")
+        ctx.warn(
+            "CONFLICT_UNRESOLVED_OMITTED",
+            f"{path}: conflicting evidence was not resolved; value omitted",
+        )
     feats = data.get("product", {}).get("features_and_capabilities", [])
-    data["product"]["features_and_capabilities"] = [f for f in feats if any(f.get(k) for k in ("name", "description", "how_it_works", "customer_benefit"))]
+    data["product"]["features_and_capabilities"] = [
+        f
+        for f in feats
+        if any(f.get(k) for k in ("name", "description", "how_it_works", "customer_benefit"))
+    ]
     try:
         brain = CompanyBrain.model_validate(data)
     except ValidationError as exc:
-        raise FatalProfileError("final profile failed validation: " + "; ".join(_format_validation_error(exc))) from exc
+        raise FatalProfileError(
+            "final profile failed validation: " + "; ".join(_format_validation_error(exc))
+        ) from exc
     clean = brain.model_dump(mode="json")
-    status = "partial" if (forced_partial or any(store.has_warning(c) for c in PARTIAL_WARNING_CODES) or not store.fetched_urls()) else "complete"
+    status = (
+        "partial"
+        if (
+            forced_partial
+            or any(store.has_warning(c) for c in PARTIAL_WARNING_CODES)
+            or not store.fetched_urls()
+        )
+        else "complete"
+    )
     output_path = write_outputs(ctx.run_dir, store, clean, status)
     store.save_draft(clean, "finalize")
     store.set_status(status, str(output_path))
@@ -653,10 +1084,21 @@ def finalize(ctx: ToolContext, *, forced_partial: bool = False) -> dict[str, Any
         "output_path": str(output_path),
         "grounded_fields": f"{grounding['grounded']}/{grounding['populated']}",
         "ungrounded": grounding["ungrounded"][:10],
-        "gaps_remaining": [g["field_path"] for g in prioritize_for_interview(clean, open_conflicts=[], asked_paths=set(), ungrounded=[])][:10],
+        "gaps_remaining": [
+            g["field_path"]
+            for g in prioritize_for_interview(
+                clean, open_conflicts=[], asked_paths=set(), ungrounded=[]
+            )
+        ][:10],
         "warnings": len(store.list_warnings()),
         "questions_asked": store.questions_asked(),
         "pending_question": pending["question"] if pending else None,
     }
-    event(log, "run_finished", f"profile exported ({status}) → {output_path}", status=status, cost_usd=round(store.total_cost(), 6))
+    event(
+        log,
+        "run_finished",
+        f"profile exported ({status}) → {output_path}",
+        status=status,
+        cost_usd=round(store.total_cost(), 6),
+    )
     return summary

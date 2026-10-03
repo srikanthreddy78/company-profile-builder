@@ -25,9 +25,15 @@ def _steps():
 
 
 def test_429_then_success_is_retried_and_logged(settings, acme_fixtures):
-    scraper = FixtureScraper(acme_fixtures, failures={
-        f"{SITE}/product": [TransientScrapeError("rate limited (429)", code="RATE_LIMITED"), TransientScrapeError("timeout", code="TIMEOUT")],
-    })
+    scraper = FixtureScraper(
+        acme_fixtures,
+        failures={
+            f"{SITE}/product": [
+                TransientScrapeError("rate limited (429)", code="RATE_LIMITED"),
+                TransientScrapeError("timeout", code="TIMEOUT"),
+            ],
+        },
+    )
     settings = settings.model_copy(update={"max_retries": 2})
     runner, _, _ = make_runner(settings, _steps(), scraper=scraper)
     outcome = runner.start(f"{SITE}/")
@@ -37,15 +43,22 @@ def test_429_then_success_is_retried_and_logged(settings, acme_fixtures):
     scrape_calls = [c for c in scraper.calls if c == ("scrape", f"{SITE}/product")]
     assert len(scrape_calls) == 3  # first attempt + 2 retries
     events = read_events(store.run_dir)
-    tool_attempts = [e["attempt"] for e in events if e.get("event") == "tool_call" and e.get("tool") == "scrape_pages"]
+    tool_attempts = [
+        e["attempt"]
+        for e in events
+        if e.get("event") == "tool_call" and e.get("tool") == "scrape_pages"
+    ]
     assert max(tool_attempts) == 3
     assert any(e.get("status") == "transient" for e in events if e.get("event") == "page_fetch")
 
 
 def test_retries_are_capped_and_run_continues(settings, acme_fixtures):
-    scraper = FixtureScraper(acme_fixtures, failures={
-        f"{SITE}/product": [TransientScrapeError("timeout", code="TIMEOUT")] * 10,
-    })
+    scraper = FixtureScraper(
+        acme_fixtures,
+        failures={
+            f"{SITE}/product": [TransientScrapeError("timeout", code="TIMEOUT")] * 10,
+        },
+    )
     settings = settings.model_copy(update={"max_retries": 2})
     runner, _, _ = make_runner(settings, _steps(), scraper=scraper)
     outcome = runner.start(f"{SITE}/")
@@ -62,7 +75,8 @@ def test_404_is_not_retried(settings, acme_fixtures):
     steps = [
         tool_call("discover_pages", {"start_url": f"{SITE}/"}),
         tool_call("scrape_pages", {"urls": [f"{SITE}/does-not-exist", f"{SITE}/product"]}),
-        AIMessage(content="done"), AIMessage(content="done"),
+        AIMessage(content="done"),
+        AIMessage(content="done"),
     ]
     runner, _, _ = make_runner(settings, steps, scraper=scraper)
     outcome = runner.start(f"{SITE}/")
@@ -79,8 +93,12 @@ def test_firecrawl_error_classification():
     assert isinstance(classify_firecrawl_error(eh.RateLimitError("429")), TransientScrapeError)
     assert isinstance(classify_firecrawl_error(eh.RequestTimeoutError("408")), TransientScrapeError)
     assert isinstance(classify_firecrawl_error(eh.InternalServerError("500")), TransientScrapeError)
-    assert isinstance(classify_firecrawl_error(requests.exceptions.ConnectTimeout()), TransientScrapeError)
-    assert isinstance(classify_firecrawl_error(eh.PaymentRequiredError("402")), PermanentScrapeError)
+    assert isinstance(
+        classify_firecrawl_error(requests.exceptions.ConnectTimeout()), TransientScrapeError
+    )
+    assert isinstance(
+        classify_firecrawl_error(eh.PaymentRequiredError("402")), PermanentScrapeError
+    )
     assert isinstance(classify_firecrawl_error(eh.UnauthorizedError("401")), PermanentScrapeError)
     assert classify_firecrawl_error(eh.WebsiteNotSupportedError("403")).code == "BLOCKED"
 
@@ -96,4 +114,6 @@ def test_model_transient_error_is_retried(settings, acme_fixtures):
     assert model.calls >= 2
     events = read_events(store.run_dir)
     model_events = [e for e in events if e.get("event") == "model_call"]
-    assert any(e.get("status") == "error" for e in model_events) and any(e.get("status") == "ok" for e in model_events)
+    assert any(e.get("status") == "error" for e in model_events) and any(
+        e.get("status") == "ok" for e in model_events
+    )

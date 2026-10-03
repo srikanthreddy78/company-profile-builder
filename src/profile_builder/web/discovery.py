@@ -91,7 +91,9 @@ def filter_and_score(
         seen.add(url)
         out.append(
             ScoredCandidate(
-                url=url, title=(cand.title or "")[:120], description=(cand.description or "")[:200],
+                url=url,
+                title=(cand.title or "")[:120],
+                description=(cand.description or "")[:200],
                 score=score_url(url, cand.title or "", cand.description or "", start_url),
             )
         )
@@ -122,12 +124,16 @@ def discover(
     except PermanentScrapeError as exc:
         notes.append(f"site map unavailable ({exc.code}); using homepage links")
     known = {normalize_url(c.url) for c in raw if c.url}
-    homepage_links = [LinkCandidate(url=u) for u in (homepage.links or []) if u and normalize_url(u) not in known]
+    homepage_links = [
+        LinkCandidate(url=u) for u in (homepage.links or []) if u and normalize_url(u) not in known
+    ]
     if homepage_links:
         raw.extend(homepage_links)
         source = "map+homepage_links" if source == "map" else "homepage_links"
     if not raw:
-        notes.append("no site map and the homepage exposed no links; only the start URL is available")
+        notes.append(
+            "no site map and the homepage exposed no links; only the start URL is available"
+        )
     raw.insert(0, LinkCandidate(url=start_url, title="Homepage"))
     candidates, dropped = filter_and_score(raw, start_url, check_dns=check_dns)
     return DiscoveryResult(

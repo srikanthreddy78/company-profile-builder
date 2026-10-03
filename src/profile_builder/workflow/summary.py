@@ -13,7 +13,13 @@ from profile_builder.security import safe_text
 from profile_builder.state.run_store import RunStore
 from profile_builder.workflow.gaps import empty_gaps, grounding_report, section_coverage
 
-STATUS_STYLE = {"complete": "bold green", "partial": "bold yellow", "failed": "bold red", "running": "cyan", "paused": "magenta"}
+STATUS_STYLE = {
+    "complete": "bold green",
+    "partial": "bold yellow",
+    "failed": "bold red",
+    "running": "cyan",
+    "paused": "magenta",
+}
 
 
 def render_question(console: Console, payload: dict[str, Any]) -> None:
@@ -43,7 +49,14 @@ def render_question(console: Console, payload: dict[str, Any]) -> None:
     console.print(Panel(body, title=header, border_style="magenta", expand=False))
 
 
-def render_summary(console: Console, store: RunStore, profile: dict[str, Any] | None, status: str, output_path: str | None, resume_hint: str | None = None) -> None:
+def render_summary(
+    console: Console,
+    store: RunStore,
+    profile: dict[str, Any] | None,
+    status: str,
+    output_path: str | None,
+    resume_hint: str | None = None,
+) -> None:
     run = store.get_run()
     usage = store.usage_totals()
     style = STATUS_STYLE.get(status, "white")
@@ -52,10 +65,26 @@ def render_summary(console: Console, store: RunStore, profile: dict[str, Any] | 
     head.add_row("Website", safe_text(run.start_url))
     head.add_row("Product focus", safe_text(run.product_focus or "(not set)"))
     head.add_row("Status", f"[{style}]{status.upper()}[/{style}]")
-    head.add_row("Pages", f"{len(store.list_pages('fetched'))} fetched · {len(store.list_pages('skipped'))} skipped · {len(store.list_pages('failed'))} failed")
-    head.add_row("Questions", f"{store.questions_asked()} asked (max {run.settings.get('max_questions')})")
-    head.add_row("Model", f"{run.settings.get('model_id')} · {usage['model_calls']} calls · {usage['input_tokens']:,} in / {usage['output_tokens']:,} out")
-    head.add_row("Est. cost", f"${usage['cost_usd']:.4f}" + (f" (budget ${run.settings['budget_usd']:.2f})" if run.settings.get("budget_usd") else " (no budget cap)"))
+    head.add_row(
+        "Pages",
+        f"{len(store.list_pages('fetched'))} fetched · {len(store.list_pages('skipped'))} skipped · {len(store.list_pages('failed'))} failed",
+    )
+    head.add_row(
+        "Questions", f"{store.questions_asked()} asked (max {run.settings.get('max_questions')})"
+    )
+    head.add_row(
+        "Model",
+        f"{run.settings.get('model_id')} · {usage['model_calls']} calls · {usage['input_tokens']:,} in / {usage['output_tokens']:,} out",
+    )
+    head.add_row(
+        "Est. cost",
+        f"${usage['cost_usd']:.4f}"
+        + (
+            f" (budget ${run.settings['budget_usd']:.2f})"
+            if run.settings.get("budget_usd")
+            else " (no budget cap)"
+        ),
+    )
     if output_path:
         head.add_row("Output", f"[bold]{output_path}[/bold]")
     console.print(Panel(head, title="Company Profile Builder", border_style=style.split()[-1]))
@@ -66,7 +95,9 @@ def render_summary(console: Console, store: RunStore, profile: dict[str, Any] | 
         cov.add_column("Filled", justify="right")
         for section, (filled, total) in section_coverage(profile).items():
             cov.add_row(section, f"{filled}/{total}")
-        g = grounding_report(profile, {e["field_path"] for e in store.list_evidence(include_superseded=False)})
+        g = grounding_report(
+            profile, {e["field_path"] for e in store.list_evidence(include_superseded=False)}
+        )
         cov.add_row("[dim]grounded fields[/dim]", f"{g['grounded']}/{g['populated']}")
         console.print(cov)
         gaps = empty_gaps(profile)

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -48,12 +48,39 @@ DEFAULT_EXCLUDE_URL_PATTERNS: tuple[str, ...] = (
     r"[?&](page|p|utm_[a-z]+|ref|fbclid|gclid)=",
 )
 PAGE_SCORE_KEYWORDS: dict[str, int] = {
-    "product": 5, "platform": 5, "solution": 4, "feature": 4, "capabilit": 4,
-    "customer": 4, "case-stud": 4, "case_stud": 4, "casestud": 4, "success": 3, "story": 3,
-    "about": 3, "company": 3, "pricing": 4, "plans": 3, "why": 3, "compare": 3, "vs": 2,
-    "use-case": 4, "usecase": 4, "industr": 3, "overview": 3, "how-it-works": 4, "security": 2,
-    "integration": 2, "faq": 2, "resources": 1, "blog": -2, "news": -2, "press": -2, "event": -3,
-    "webinar": -3, "podcast": -3,
+    "product": 5,
+    "platform": 5,
+    "solution": 4,
+    "feature": 4,
+    "capabilit": 4,
+    "customer": 4,
+    "case-stud": 4,
+    "case_stud": 4,
+    "casestud": 4,
+    "success": 3,
+    "story": 3,
+    "about": 3,
+    "company": 3,
+    "pricing": 4,
+    "plans": 3,
+    "why": 3,
+    "compare": 3,
+    "vs": 2,
+    "use-case": 4,
+    "usecase": 4,
+    "industr": 3,
+    "overview": 3,
+    "how-it-works": 4,
+    "security": 2,
+    "integration": 2,
+    "faq": 2,
+    "resources": 1,
+    "blog": -2,
+    "news": -2,
+    "press": -2,
+    "event": -3,
+    "webinar": -3,
+    "podcast": -3,
 }
 
 # Content limits -----------------------------------------------------------------------
@@ -148,7 +175,7 @@ class Settings(BaseSettings):
         return math.ceil(self.max_pages / PAGES_PER_SCRAPE_CALL) + 1
 
     # ---- persistence -------------------------------------------------------------
-    SNAPSHOT_FIELDS: tuple[str, ...] = (
+    SNAPSHOT_FIELDS: ClassVar[tuple[str, ...]] = (
         "max_pages",
         "max_questions",
         "model",

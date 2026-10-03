@@ -71,9 +71,14 @@ class RunTelemetryMiddleware(AgentMiddleware):
         except Exception as exc:
             status = "error"
             event(
-                log, "model_call", f"model call failed: {type(exc).__name__}: {str(exc)[:200]}",
-                level=30, attempt=attempt, duration_ms=int((time.perf_counter() - t0) * 1000),
-                status=status, model=self.model_id,
+                log,
+                "model_call",
+                f"model call failed: {type(exc).__name__}: {str(exc)[:200]}",
+                level=30,
+                attempt=attempt,
+                duration_ms=int((time.perf_counter() - t0) * 1000),
+                status=status,
+                model=self.model_id,
             )
             raise
         tokens_in = tokens_out = 0
@@ -89,9 +94,16 @@ class RunTelemetryMiddleware(AgentMiddleware):
             model_name = meta.get("model_name") or model_name
         self.store.add_usage("model", model_name, tokens_in, tokens_out, cost)
         event(
-            log, "model_call", "model call ok", attempt=attempt,
-            duration_ms=int((time.perf_counter() - t0) * 1000), tokens_in=tokens_in,
-            tokens_out=tokens_out, cost_usd=round(cost, 6), status=status, model=model_name,
+            log,
+            "model_call",
+            "model call ok",
+            attempt=attempt,
+            duration_ms=int((time.perf_counter() - t0) * 1000),
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost_usd=round(cost, 6),
+            status=status,
+            model=model_name,
         )
         return response
 
@@ -104,16 +116,38 @@ class RunTelemetryMiddleware(AgentMiddleware):
         try:
             result = handler(request)
         except GraphBubbleUp:
-            event(log, "tool_call", f"{name} paused for user input", attempt=attempt,
-                  duration_ms=int((time.perf_counter() - t0) * 1000), tool=name, status="interrupted")
+            event(
+                log,
+                "tool_call",
+                f"{name} paused for user input",
+                attempt=attempt,
+                duration_ms=int((time.perf_counter() - t0) * 1000),
+                tool=name,
+                status="interrupted",
+            )
             raise
         except Exception as exc:
-            event(log, "tool_call", f"{name} raised {type(exc).__name__}: {str(exc)[:200]}", level=30,
-                  attempt=attempt, duration_ms=int((time.perf_counter() - t0) * 1000), tool=name, status="error")
+            event(
+                log,
+                "tool_call",
+                f"{name} raised {type(exc).__name__}: {str(exc)[:200]}",
+                level=30,
+                attempt=attempt,
+                duration_ms=int((time.perf_counter() - t0) * 1000),
+                tool=name,
+                status="error",
+            )
             raise
         status = getattr(result, "status", "ok") if isinstance(result, ToolMessage) else "ok"
-        event(log, "tool_call", f"{name} finished", attempt=attempt,
-              duration_ms=int((time.perf_counter() - t0) * 1000), tool=name, status=status or "ok")
+        event(
+            log,
+            "tool_call",
+            f"{name} finished",
+            attempt=attempt,
+            duration_ms=int((time.perf_counter() - t0) * 1000),
+            tool=name,
+            status=status or "ok",
+        )
         return result
 
 
@@ -142,7 +176,9 @@ class BudgetCapMiddleware(AgentMiddleware):
         if spent < self.budget_usd:
             return None
         message = f"Budget of ${self.budget_usd:.2f} reached (estimated spend ${spent:.4f}); stopping before the next model call."
-        self.store.add_warning("BUDGET_EXCEEDED", message, {"spent_usd": spent, "budget_usd": self.budget_usd})
+        self.store.add_warning(
+            "BUDGET_EXCEEDED", message, {"spent_usd": spent, "budget_usd": self.budget_usd}
+        )
         event(log, "limit_reached", message, level=30, kind="budget", cost_usd=round(spent, 6))
         return {"jump_to": "end", "messages": [AIMessage(content=message)]}
 
@@ -188,11 +224,15 @@ def build_middleware(settings: Settings, store: RunStore) -> list[AgentMiddlewar
         stack.append(BudgetCapMiddleware(store, settings.budget_usd))
     stack += [
         ModelCallLimitMiddleware(thread_limit=settings.max_model_calls, exit_behavior="end"),
+        # The ask_user tool enforces the exact question cap (and records the warning); this
+        # middleware cap is a backstop one above it against a misbehaving loop.
         ToolCallLimitMiddleware(
-            tool_name="ask_user", thread_limit=settings.max_questions, exit_behavior="continue"
+            tool_name="ask_user", thread_limit=settings.max_questions + 1, exit_behavior="continue"
         ),
         ToolCallLimitMiddleware(
-            tool_name="scrape_pages", thread_limit=settings.max_scrape_calls, exit_behavior="continue"
+            tool_name="scrape_pages",
+            thread_limit=settings.max_scrape_calls,
+            exit_behavior="continue",
         ),
         SoloAskUserGuardMiddleware(),
         ModelRetryMiddleware(

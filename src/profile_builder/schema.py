@@ -25,7 +25,7 @@ def _clean_str(value: Any) -> str:
         raise ValueError(f"expected a string, got {type(value).__name__}")
     stripped = value.strip()
     if stripped.lower() in FILLER_VALUES:
-        raise ValueError(f"filler value {value!r} is not allowed; use \"\" for unknown")
+        raise ValueError(f'filler value {value!r} is not allowed; use "" for unknown')
     return stripped
 
 
@@ -36,7 +36,10 @@ def _clean_str_list(values: Any) -> list[str]:
         raise ValueError(f"expected a list of strings, got {type(values).__name__}")
     out: list[str] = []
     for v in values:
-        s = _clean_str(v)
+        try:
+            s = _clean_str(v)
+        except ValueError:
+            continue  # filler items ("unknown", "N/A") are dropped, not fatal
         if s:
             out.append(s)
     return out
@@ -92,7 +95,12 @@ class Customer(_Strict):
 
     _clean = field_validator("target_customer", mode="before")(_clean_str)
     _clean_list = field_validator(
-        "buyers", "users", "problems", "use_cases", "desired_outcomes", "existing_alternatives",
+        "buyers",
+        "users",
+        "problems",
+        "use_cases",
+        "desired_outcomes",
+        "existing_alternatives",
         mode="before",
     )(_clean_str_list)
 
@@ -104,8 +112,11 @@ class ContentEvidence(_Strict):
     proprietary_insights_or_examples: list[str] = Field(default_factory=list)
 
     _clean_list = field_validator(
-        "customer_stories", "company_expertise", "product_evidence",
-        "proprietary_insights_or_examples", mode="before",
+        "customer_stories",
+        "company_expertise",
+        "product_evidence",
+        "proprietary_insights_or_examples",
+        mode="before",
     )(_clean_str_list)
 
 
@@ -116,7 +127,10 @@ class Brand(_Strict):
     terms_or_claims_to_avoid: list[str] = Field(default_factory=list)
 
     _clean_list = field_validator(
-        "voice_and_tone", "writing_style", "preferred_terms", "terms_or_claims_to_avoid",
+        "voice_and_tone",
+        "writing_style",
+        "preferred_terms",
+        "terms_or_claims_to_avoid",
         mode="before",
     )(_clean_str_list)
 
@@ -170,9 +184,7 @@ STRING_LIST_PATHS: tuple[str, ...] = (
 FEATURE_LIST_PATH = "product.features_and_capabilities"
 FEATURE_FIELDS: tuple[str, ...] = ("name", "description", "how_it_works", "customer_benefit")
 
-_PATH_RE = re.compile(
-    r"^(?P<base>[a-z_]+\.[a-z_]+)(?:\[(?P<idx>\d+)\])?(?:\.(?P<sub>[a-z_]+))?$"
-)
+_PATH_RE = re.compile(r"^(?P<base>[a-z_]+\.[a-z_]+)(?:\[(?P<idx>\d+)\])?(?:\.(?P<sub>[a-z_]+))?$")
 
 
 class FieldPathError(ValueError):

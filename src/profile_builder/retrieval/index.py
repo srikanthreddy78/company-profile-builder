@@ -24,14 +24,60 @@ from profile_builder.config import (
 )
 from profile_builder.logging_setup import get_logger
 from profile_builder.models import estimate_cost_usd
-from profile_builder.retrieval.chunking import Chunk
+from profile_builder.retrieval.chunking import chunk_markdown, paragraph_hashes
 from profile_builder.state.run_store import ChunkRecord, RunStore
 
 log = get_logger("index")
 
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9\-']+")
 _STOPWORDS = frozenset(
-    ["the", "a", "an", "and", "or", "of", "to", "in", "for", "on", "with", "by", "at", "from", "as", "is", "are", "was", "were", "be", "been", "it", "its", "this", "that", "these", "those", "we", "our", "you", "your", "they", "their", "he", "she", "his", "her", "them", "us", "i", "me", "my", "can", "will", "may"]
+    [
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "of",
+        "to",
+        "in",
+        "for",
+        "on",
+        "with",
+        "by",
+        "at",
+        "from",
+        "as",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "it",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        "we",
+        "our",
+        "you",
+        "your",
+        "they",
+        "their",
+        "he",
+        "she",
+        "his",
+        "her",
+        "them",
+        "us",
+        "i",
+        "me",
+        "my",
+        "can",
+        "will",
+        "may",
+    ]
 )
 
 
@@ -88,17 +134,21 @@ class HybridIndex:
         self.embeddings = embeddings if use_embeddings else None
         self.embedding_model = embedding_model
         self._chunks: list[ChunkRecord] | None = None
+        self._token_sets: list[set[str]] = []
         self._bm25: BM25Okapi | None = None
         self._matrix: np.ndarray | None = None
 
     # ---- indexing ------------------------------------------------------------------
-    def index_page(self, url: str, chunks: list[Chunk]) -> tuple[int, int]:
-        """Store chunks for a page, skipping text already seen on other pages. Returns (kept, dropped)."""
-        existing = self.store.chunk_hashes()
-        own = {c.text_hash for c in self.store.list_chunks(url)}
-        foreign = existing - own
-        kept = [c for c in chunks if c.text_hash not in foreign]
-        dropped = len(chunks) - len(kept)
+    def index_page(self, url: str, markdown: str, *, title: str = "") -> tuple[int, int]:
+        """Chunk + store a page, dropping paragraphs already seen on *other* pages (shared
+        nav/footers) and chunks whose text repeats elsewhere. Returns (chunks_kept, dropped)."""
+        known = self.store.paragraph_hashes(exclude_url=url)
+        chunks, dropped_paragraphs = chunk_markdown(
+            markdown, page_title=title, known_paragraphs=known
+        )
+        foreign_chunks = self.store.chunk_hashes(exclude_url=url)
+        kept = [c for c in chunks if c.text_hash not in foreign_chunks]
+        dropped = dropped_paragraphs + (len(chunks) - len(kept))
         vectors: list[np.ndarray | None] = [None] * len(kept)
         if self.embeddings is not None and kept:
             texts = [c.text for c in kept]
@@ -106,12 +156,16 @@ class HybridIndex:
             vectors = [np.asarray(v, dtype=np.float32) for v in embedded]
             approx_tokens = sum(len(t) for t in texts) // CHARS_PER_TOKEN
             self.store.add_usage(
-                "embedding", self.embedding_model, approx_tokens, 0,
+                "embedding",
+                self.embedding_model,
+                approx_tokens,
+                0,
                 estimate_cost_usd(self.embedding_model, {"input_tokens": approx_tokens}),
             )
         self.store.replace_chunks(
             url, [(i, c.heading, c.text, c.text_hash, vectors[i]) for i, c in enumerate(kept)]
         )
+        self.store.replace_paragraphs(url, paragraph_hashes(markdown))
         self._invalidate()
         return len(kept), dropped
 
@@ -124,6 +178,7 @@ class HybridIndex:
         if self._chunks is None:
             self._chunks = self.store.list_chunks()
             corpus = [tokenize(c.text) or ["_"] for c in self._chunks]
+            self._token_sets = [set(toks) for toks in corpus]
             self._bm25 = BM25Okapi(corpus) if corpus else None
             vecs = [c.embedding for c in self._chunks]
             if vecs and all(v is not None for v in vecs):
@@ -146,9 +201,12 @@ class HybridIndex:
         rankings: list[list[int]] = []
 
         if self._bm25 is not None:
-            scores = self._bm25.get_scores(tokenize(query) or ["_"])
-            bm = sorted(idxs, key=lambda i: float(scores[i]), reverse=True)
-            rankings.append([i for i in bm if scores[i] > 0][: k * 3])
+            q_tokens = set(tokenize(query))
+            scores = self._bm25.get_scores(list(q_tokens) or ["_"])
+            # Rank only chunks sharing a query term (BM25 scores can be <= 0 on tiny corpora).
+            matched = [i for i in idxs if q_tokens & self._token_sets[i]]
+            matched.sort(key=lambda i: float(scores[i]), reverse=True)
+            rankings.append(matched[: k * 3])
 
         if self.embeddings is not None and self._matrix is not None:
             q = np.asarray(self.embeddings.embed_query(query), dtype=np.float32)
@@ -173,15 +231,25 @@ class HybridIndex:
             seen_hash.add(c.text_hash)
             hits.append(
                 SearchHit(
-                    url=c.url, heading=c.heading, excerpt=_excerpt(c.text, query),
-                    ordinal=c.ordinal, score=round(score, 4),
+                    url=c.url,
+                    heading=c.heading,
+                    excerpt=_excerpt(c.text, query),
+                    ordinal=c.ordinal,
+                    score=round(score, 4),
                 )
             )
             if len(hits) >= k:
                 break
         return hits
 
-    def read(self, url: str, *, section: str | None = None, offset: int = 0, max_chars: int = MAX_READ_CHARS) -> tuple[str, bool, int]:
+    def read(
+        self,
+        url: str,
+        *,
+        section: str | None = None,
+        offset: int = 0,
+        max_chars: int = MAX_READ_CHARS,
+    ) -> tuple[str, bool, int]:
         """Return (text, more_available, next_offset) for a page or a heading section."""
         chunks = [c for c in self._load() if c.url == url]
         if section:

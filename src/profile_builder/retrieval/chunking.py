@@ -28,7 +28,9 @@ class Chunk:
 
 
 def text_hash(text: str) -> str:
-    return hashlib.sha1(normalize_for_match(text).encode("utf-8"), usedforsecurity=False).hexdigest()
+    return hashlib.sha1(
+        normalize_for_match(text).encode("utf-8"), usedforsecurity=False
+    ).hexdigest()
 
 
 def _clean_markdown(md: str) -> str:
@@ -74,13 +76,28 @@ def _split_long(text: str, max_chars: int, overlap: int) -> list[str]:
     return pieces
 
 
+def paragraph_hashes(markdown: str) -> set[str]:
+    md = _clean_markdown(markdown or "")
+    body = "\n".join(line for line in md.splitlines() if not _HEADING_RE.match(line.strip()))
+    return {
+        text_hash(p)
+        for p in re.split(r"\n\s*\n", body)
+        if p.strip() and len(p.strip()) >= MIN_CHUNK_CHARS
+    }
+
+
 def chunk_markdown(
     markdown: str,
     *,
     max_chars: int = MAX_CHUNK_CHARS,
     overlap: int = OVERLAP_CHARS,
     page_title: str = "",
-) -> list[Chunk]:
+    known_paragraphs: set[str] | None = None,
+) -> tuple[list[Chunk], int]:
+    """Chunk a page. Paragraphs whose hash is in `known_paragraphs` (seen on other pages:
+    nav, footers, cookie banners) are dropped. Returns (chunks, dropped_paragraphs)."""
+    known = known_paragraphs or set()
+    dropped = 0
     md = _clean_markdown(markdown or "")
     heading = page_title or ""
     sections: list[tuple[str, list[str]]] = [(heading, [])]
@@ -100,6 +117,9 @@ def chunk_markdown(
             continue
         paragraphs = [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
         paragraphs = [p for p in paragraphs if not _is_navigational(p)]
+        fresh = [p for p in paragraphs if text_hash(p) not in known]
+        dropped += len(paragraphs) - len(fresh)
+        paragraphs = fresh
         buf = ""
         pending: list[str] = []
         for p in paragraphs:
@@ -121,4 +141,4 @@ def chunk_markdown(
                 continue
             seen_in_page.add(h)
             chunks.append(Chunk(ordinal=len(chunks), heading=heading[:120], text=text, text_hash=h))
-    return chunks
+    return chunks, dropped

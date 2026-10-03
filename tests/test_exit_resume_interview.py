@@ -19,24 +19,58 @@ from tests.conftest import (
     tool_call,
 )
 
-Q1 = {"question": "Which customer segment should this profile prioritize?", "why_unclear": "Homepage and customers page disagree.", "field_paths": ["customer.target_customer"], "kind": "conflict"}
-Q2 = {"question": "Who typically signs off on the purchase (buyers)?", "why_unclear": "No page names the decision maker.", "field_paths": ["customer.buyers"], "kind": "gap"}
+Q1 = {
+    "question": "Which customer segment should this profile prioritize?",
+    "why_unclear": "Homepage and customers page disagree.",
+    "field_paths": ["customer.target_customer"],
+    "kind": "conflict",
+}
+Q2 = {
+    "question": "Who typically signs off on the purchase (buyers)?",
+    "why_unclear": "No page names the decision maker.",
+    "field_paths": ["customer.buyers"],
+    "kind": "gap",
+}
 
 
 def two_question_steps():
     def apply_first(messages: list[BaseMessage]) -> AIMessage:
         res = last_tool_result(messages)
-        return tool_call("apply_profile_updates", {"updates": [{"field_path": "customer.target_customer", "value": res["answer"], "evidence": {"kind": "interview", "question_id": res["qid"]}}]})
+        return tool_call(
+            "apply_profile_updates",
+            {
+                "updates": [
+                    {
+                        "field_path": "customer.target_customer",
+                        "value": res["answer"],
+                        "evidence": {"kind": "interview", "question_id": res["qid"]},
+                    }
+                ]
+            },
+        )
 
     def apply_second(messages: list[BaseMessage]) -> AIMessage:
         res = last_tool_result(messages)
         if res.get("status") == "answered":
-            return tool_call("apply_profile_updates", {"updates": [{"field_path": "customer.buyers", "value": [res["answer"]], "evidence": {"kind": "interview", "question_id": res["qid"]}}]})
+            return tool_call(
+                "apply_profile_updates",
+                {
+                    "updates": [
+                        {
+                            "field_path": "customer.buyers",
+                            "value": [res["answer"]],
+                            "evidence": {"kind": "interview", "question_id": res["qid"]},
+                        }
+                    ]
+                },
+            )
         return tool_call("finalize_profile", {})
 
     return [
         tool_call("discover_pages", {"start_url": f"{SITE}/"}),
-        tool_call("scrape_pages", {"urls": [f"{SITE}/product", f"{SITE}/customers", f"{SITE}/about"]}),
+        tool_call(
+            "scrape_pages", {"urls": [f"{SITE}/product", f"{SITE}/customers", f"{SITE}/about"]}
+        ),
         tool_call("save_profile_draft", {"profile": DRAFT_PROFILE, "evidence": DRAFT_EVIDENCE}),
         tool_call("ask_user", Q1, "ask1"),
         apply_first,
@@ -50,7 +84,9 @@ def two_question_steps():
 def test_exit_then_resume_keeps_committed_answer(settings, acme_fixtures):
     scraper = FixtureScraper(acme_fixtures)
     # Process 1: answer Q1, then exit when Q2 appears.
-    runner1, model1, asked1 = make_runner(settings, two_question_steps(), scraper=scraper, answers=["Regulated enterprises", "exit"])
+    runner1, _model1, _asked1 = make_runner(
+        settings, two_question_steps(), scraper=scraper, answers=["Regulated enterprises", "exit"]
+    )
     outcome1 = runner1.start(f"{SITE}/")
     assert outcome1.status == "paused" and outcome1.resume_hint
     run_dir = settings.runs_dir / outcome1.run_id
@@ -82,11 +118,13 @@ def test_exit_then_resume_keeps_committed_answer(settings, acme_fixtures):
 def test_skip_and_idk_are_recorded_as_unresolved(settings, acme_fixtures):
     scraper = FixtureScraper(acme_fixtures)
     steps = two_question_steps()
+
     # replace apply_first with a step that tolerates a skipped answer
     def after_q1(messages):
         res = last_tool_result(messages)
         assert res["status"] == "skipped" and res["answer"] == "SKIPPED"
         return steps[5]
+
     steps[4] = after_q1
     runner, _, _ = make_runner(settings, steps, scraper=scraper, answers=["skip", "I don't know"])
     outcome = runner.start(f"{SITE}/")
@@ -98,7 +136,9 @@ def test_skip_and_idk_are_recorded_as_unresolved(settings, acme_fixtures):
 
 
 def test_non_interactive_mode_skips_everything(settings, acme_fixtures):
-    runner, _, _ = make_runner(settings, two_question_steps(), scraper=FixtureScraper(acme_fixtures), non_interactive=True)
+    runner, _, _ = make_runner(
+        settings, two_question_steps(), scraper=FixtureScraper(acme_fixtures), non_interactive=True
+    )
     outcome = runner.start(f"{SITE}/")
     assert outcome.status == "complete"
     store = RunStore(settings.runs_dir / outcome.run_id)
@@ -108,12 +148,19 @@ def test_non_interactive_mode_skips_everything(settings, acme_fixtures):
 def test_question_limit_is_enforced(settings, acme_fixtures):
     settings = settings.model_copy(update={"max_questions": 1})
     steps = two_question_steps()
+
     def after_q2(messages):
         res = last_tool_result(messages)
         assert res["ok"] is False and "limit" in res["error"]
         return tool_call("finalize_profile", {})
+
     steps[6] = after_q2
-    runner, _, asked = make_runner(settings, steps, scraper=FixtureScraper(acme_fixtures), answers=["Regulated enterprises", "should-not-be-asked"])
+    runner, _, asked = make_runner(
+        settings,
+        steps,
+        scraper=FixtureScraper(acme_fixtures),
+        answers=["Regulated enterprises", "should-not-be-asked"],
+    )
     outcome = runner.start(f"{SITE}/")
     assert outcome.status == "complete" and asked == ["Regulated enterprises"]
     store = RunStore(settings.runs_dir / outcome.run_id)

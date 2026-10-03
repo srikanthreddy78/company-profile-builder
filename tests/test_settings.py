@@ -17,7 +17,10 @@ def test_defaults_and_derived_limits():
     assert s.max_pages == 10 and s.max_questions == 5
     assert s.model_id == MODEL_TIERS["fast"]
     assert s.budget_usd is None  # unlimited by default
-    assert s.max_model_calls == MODEL_CALL_BASE + 3 * MODEL_CALLS_PER_PAGE * 10 // 3 + MODEL_CALLS_PER_QUESTION * 5
+    assert (
+        s.max_model_calls
+        == MODEL_CALL_BASE + 3 * MODEL_CALLS_PER_PAGE * 10 // 3 + MODEL_CALLS_PER_QUESTION * 5
+    )
 
 
 def test_env_precedence(monkeypatch):
@@ -38,7 +41,9 @@ def test_max_pages_propagates_everywhere():
     big = Settings(_env_file=None, max_pages=15, max_questions=5)
     assert big.max_scrape_calls > small.max_scrape_calls
     assert big.max_model_calls == small.max_model_calls + 5 * MODEL_CALLS_PER_PAGE
-    prompt = render_system_prompt(max_pages=big.max_pages, max_questions=big.max_questions, product_focus=None)
+    prompt = render_system_prompt(
+        max_pages=big.max_pages, max_questions=big.max_questions, product_focus=None
+    )
     assert "at most 15 unique pages" in prompt and "at most 5 interview" in prompt
 
 

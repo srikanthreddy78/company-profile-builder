@@ -24,7 +24,9 @@ def evidence_paths(store: RunStore) -> set[str]:
     return {e["field_path"] for e in store.list_evidence(include_superseded=False)}
 
 
-def build_evidence_document(store: RunStore, profile: dict[str, Any], status: str) -> dict[str, Any]:
+def build_evidence_document(
+    store: RunStore, profile: dict[str, Any], status: str
+) -> dict[str, Any]:
     run = store.get_run()
     grounding = grounding_report(profile, evidence_paths(store))
     return {
@@ -37,29 +39,47 @@ def build_evidence_document(store: RunStore, profile: dict[str, Any], status: st
         "settings": run.settings,
         "pages": [
             {
-                "url": p.url, "final_url": p.final_url, "status": p.status, "http_status": p.http_status,
-                "title": p.title, "chars": p.char_count, "error_code": p.error_code, "error": p.error,
+                "url": p.url,
+                "final_url": p.final_url,
+                "status": p.status,
+                "http_status": p.http_status,
+                "title": p.title,
+                "chars": p.char_count,
+                "error_code": p.error_code,
+                "error": p.error,
             }
             for p in store.list_pages()
         ],
         "evidence": [
             {
-                "field_path": e["field_path"], "kind": e["kind"], "source_url": e["source_url"],
-                "excerpt": e["excerpt"], "question_id": e["question_id"], "answer": e["answer"],
+                "field_path": e["field_path"],
+                "kind": e["kind"],
+                "source_url": e["source_url"],
+                "excerpt": e["excerpt"],
+                "question_id": e["question_id"],
+                "answer": e["answer"],
                 "superseded": bool(e["superseded"]),
             }
             for e in store.list_evidence()
         ],
         "questions": [
             {
-                "qid": q["qid"], "n": q["ordinal"], "kind": q["kind"], "question": q["question"],
-                "why_unclear": q["why_unclear"], "field_paths": q["field_paths"], "status": q["status"],
+                "qid": q["qid"],
+                "n": q["ordinal"],
+                "kind": q["kind"],
+                "question": q["question"],
+                "why_unclear": q["why_unclear"],
+                "field_paths": q["field_paths"],
+                "status": q["status"],
                 "answer": q["answer"],
             }
             for q in store.list_questions()
         ],
         "conflicts": store.list_conflicts(),
-        "warnings": [{"code": w["code"], "message": w["message"], "details": w["details"]} for w in store.list_warnings()],
+        "warnings": [
+            {"code": w["code"], "message": w["message"], "details": w["details"]}
+            for w in store.list_warnings()
+        ],
         "gaps": [g.to_dict() for g in empty_gaps(profile)],
         "grounding": grounding,
         "usage": store.usage_totals(),
@@ -114,8 +134,10 @@ def build_report(store: RunStore, profile: dict[str, Any], status: str, output_p
     if conflicts:
         lines += ["", "## Conflicts", ""]
         for c in conflicts:
-            lines.append(f"- `{c['field_path']}` [{c['status']}] {c.get('summary') or ''}"
-                         + (f" → {c['resolution']}" if c.get("resolution") else ""))
+            lines.append(
+                f"- `{c['field_path']}` [{c['status']}] {c.get('summary') or ''}"
+                + (f" → {c['resolution']}" if c.get("resolution") else "")
+            )
     warnings = store.list_warnings()
     lines += ["", "## Warnings", ""]
     if not warnings:
@@ -131,6 +153,14 @@ def write_outputs(run_dir: Path, store: RunStore, profile: dict[str, Any], statu
     output_path = run_dir / OUTPUT_FILENAME
     atomic_write_text(output_path, brain.to_json(), mode=0o644)
     evidence_doc = build_evidence_document(store, brain.model_dump(mode="json"), status)
-    atomic_write_text(run_dir / EVIDENCE_FILENAME, json.dumps(evidence_doc, indent=2, ensure_ascii=False) + "\n", mode=0o644)
-    atomic_write_text(run_dir / REPORT_FILENAME, build_report(store, brain.model_dump(mode="json"), status, output_path), mode=0o644)
+    atomic_write_text(
+        run_dir / EVIDENCE_FILENAME,
+        json.dumps(evidence_doc, indent=2, ensure_ascii=False) + "\n",
+        mode=0o644,
+    )
+    atomic_write_text(
+        run_dir / REPORT_FILENAME,
+        build_report(store, brain.model_dump(mode="json"), status, output_path),
+        mode=0o644,
+    )
     return output_path

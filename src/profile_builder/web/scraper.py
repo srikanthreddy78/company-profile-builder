@@ -32,7 +32,9 @@ class TransientScrapeError(Exception):
 class PermanentScrapeError(Exception):
     """Not retryable: 4xx (except 408/429), blocked, unsupported, invalid credentials."""
 
-    def __init__(self, message: str, *, code: str = "PERMANENT", http_status: int | None = None) -> None:
+    def __init__(
+        self, message: str, *, code: str = "PERMANENT", http_status: int | None = None
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.http_status = http_status
@@ -98,19 +100,31 @@ def classify_firecrawl_error(exc: BaseException) -> TransientScrapeError | Perma
     if isinstance(exc, eh.InternalServerError):
         return TransientScrapeError("server error (500)", code="SERVER_ERROR")
     if isinstance(exc, eh.UnauthorizedError):
-        return PermanentScrapeError("invalid Firecrawl credentials (401)", code="UNAUTHORIZED", http_status=401)
+        return PermanentScrapeError(
+            "invalid Firecrawl credentials (401)", code="UNAUTHORIZED", http_status=401
+        )
     if isinstance(exc, eh.PaymentRequiredError):
-        return PermanentScrapeError("Firecrawl credits exhausted (402)", code="PAYMENT_REQUIRED", http_status=402)
+        return PermanentScrapeError(
+            "Firecrawl credits exhausted (402)", code="PAYMENT_REQUIRED", http_status=402
+        )
     if isinstance(exc, (eh.WebsiteNotSupportedError, eh.ProviderTermsRequiredError)):
-        return PermanentScrapeError("website blocked or unsupported (403)", code="BLOCKED", http_status=403)
+        return PermanentScrapeError(
+            "website blocked or unsupported (403)", code="BLOCKED", http_status=403
+        )
     if isinstance(exc, eh.BadRequestError):
-        return PermanentScrapeError(f"bad request: {_short(exc)}", code="BAD_REQUEST", http_status=400)
+        return PermanentScrapeError(
+            f"bad request: {_short(exc)}", code="BAD_REQUEST", http_status=400
+        )
     if isinstance(exc, eh.FirecrawlError):
         status = getattr(exc, "status_code", None)
         if status is not None and int(status) >= 500:
             return TransientScrapeError(f"server error ({status})", code="SERVER_ERROR")
-        return PermanentScrapeError(f"firecrawl error: {_short(exc)}", code="FIRECRAWL_ERROR", http_status=status)
-    return PermanentScrapeError(f"unexpected scrape error: {type(exc).__name__}: {_short(exc)}", code="UNEXPECTED")
+        return PermanentScrapeError(
+            f"firecrawl error: {_short(exc)}", code="FIRECRAWL_ERROR", http_status=status
+        )
+    return PermanentScrapeError(
+        f"unexpected scrape error: {type(exc).__name__}: {_short(exc)}", code="UNEXPECTED"
+    )
 
 
 def _short(exc: BaseException, limit: int = 200) -> str:
@@ -142,8 +156,14 @@ class FirecrawlScraper:
         if status is not None and int(status) >= 400:
             if int(status) in (408, 429) or int(status) >= 500:
                 raise TransientScrapeError(f"target returned HTTP {status}", code=f"HTTP_{status}")
-            raise PermanentScrapeError(f"target returned HTTP {status}", code=f"HTTP_{status}", http_status=int(status))
-        final_url = (getattr(meta, "source_url", None) or getattr(meta, "url", None) or url) if meta else url
+            raise PermanentScrapeError(
+                f"target returned HTTP {status}", code=f"HTTP_{status}", http_status=int(status)
+            )
+        final_url = (
+            (getattr(meta, "source_url", None) or getattr(meta, "url", None) or url)
+            if meta
+            else url
+        )
         return ScrapedPage(
             url=url,
             final_url=final_url,
@@ -183,7 +203,9 @@ class FixtureScraper:
     before the page is served (used to simulate 429/timeouts in tests).
     """
 
-    def __init__(self, fixture_dir: Path, failures: dict[str, list[BaseException]] | None = None) -> None:
+    def __init__(
+        self, fixture_dir: Path, failures: dict[str, list[BaseException]] | None = None
+    ) -> None:
         self.dir = Path(fixture_dir)
         self.pages_dir = self.dir / "pages"
         self._failures = {normalize_url(k): list(v) for k, v in (failures or {}).items()}
@@ -199,7 +221,9 @@ class FixtureScraper:
         self._maybe_fail(url)
         path = self.pages_dir / url_cache_name(normalize_url(url))
         if not path.exists():
-            raise PermanentScrapeError("fixture page not found (404)", code="HTTP_404", http_status=404)
+            raise PermanentScrapeError(
+                "fixture page not found (404)", code="HTTP_404", http_status=404
+            )
         page = ScrapedPage.from_json(path.read_text(encoding="utf-8"))
         if not with_links:
             page.links = []
@@ -212,8 +236,10 @@ class FixtureScraper:
         if not path.exists():
             return []
         data = json.loads(path.read_text(encoding="utf-8"))
-        return [LinkCandidate(**{k: v for k, v in d.items() if k in ("url", "title", "description")})
-                for d in data][:limit]
+        return [
+            LinkCandidate(**{k: v for k, v in d.items() if k in ("url", "title", "description")})
+            for d in data
+        ][:limit]
 
     @staticmethod
     def write_page(fixture_dir: Path, page: ScrapedPage) -> Path:

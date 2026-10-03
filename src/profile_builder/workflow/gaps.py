@@ -69,7 +69,12 @@ class Gap:
     kind: str  # empty | partial_feature | ungrounded | conflict
 
     def to_dict(self) -> dict[str, Any]:
-        return {"field_path": self.field_path, "priority": self.priority, "reason": self.reason, "kind": self.kind}
+        return {
+            "field_path": self.field_path,
+            "priority": self.priority,
+            "reason": self.reason,
+            "kind": self.kind,
+        }
 
 
 def empty_gaps(profile: dict[str, Any]) -> list[Gap]:
@@ -82,7 +87,9 @@ def empty_gaps(profile: dict[str, Any]) -> list[Gap]:
             gaps.append(Gap(path, PRIORITY.get(path, 10), REASONS.get(path, "missing"), "empty"))
     features = get_by_path(profile, FEATURE_LIST_PATH) or []
     if not features:
-        gaps.append(Gap(FEATURE_LIST_PATH, PRIORITY[FEATURE_LIST_PATH], REASONS[FEATURE_LIST_PATH], "empty"))
+        gaps.append(
+            Gap(FEATURE_LIST_PATH, PRIORITY[FEATURE_LIST_PATH], REASONS[FEATURE_LIST_PATH], "empty")
+        )
     for i, feat in enumerate(features):
         for sub in ("description", "how_it_works", "customer_benefit"):
             if not feat.get(sub):
@@ -141,12 +148,16 @@ def prioritize_for_interview(
     for c in open_conflicts:
         if c["field_path"] in asked_paths:
             continue
-        items.append(Gap(c["field_path"], 110, f"conflicting evidence: {c.get('summary') or ''}", "conflict"))
+        items.append(
+            Gap(c["field_path"], 110, f"conflicting evidence: {c.get('summary') or ''}", "conflict")
+        )
     for g in empty_gaps(profile):
         if g.field_path in asked_paths or g.field_path.split("[")[0] in asked_paths:
             continue
         items.append(g)
     for p in ungrounded[:5]:
-        items.append(Gap(p, 15, "populated without verified evidence; confirm or cite", "ungrounded"))
+        items.append(
+            Gap(p, 15, "populated without verified evidence; confirm or cite", "ungrounded")
+        )
     items.sort(key=lambda g: g.priority, reverse=True)
     return [g.to_dict() for g in items[:limit]]

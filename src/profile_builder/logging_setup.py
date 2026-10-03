@@ -27,8 +27,21 @@ _run_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("run_id", defa
 _stage_var: contextvars.ContextVar[str] = contextvars.ContextVar("stage", default="init")
 
 EVENT_FIELDS = (
-    "event", "attempt", "duration_ms", "tokens_in", "tokens_out", "cost_usd",
-    "tool", "url", "code", "qid", "status", "count", "version", "kind", "model",
+    "event",
+    "attempt",
+    "duration_ms",
+    "tokens_in",
+    "tokens_out",
+    "cost_usd",
+    "tool",
+    "url",
+    "code",
+    "qid",
+    "status",
+    "count",
+    "version",
+    "kind",
+    "model",
 )
 
 _SECRET_PATTERNS = [
@@ -150,6 +163,7 @@ def configure_console(level: str = "INFO", console: Console | None = None) -> No
 def attach_run_sinks(run_dir: Path, secrets: Iterable[str] = ()) -> None:
     """Add events.jsonl + run.log sinks for a run (idempotent per run_dir)."""
     root = logging.getLogger(LOGGER_NAME)
+    root.setLevel(logging.DEBUG)  # sinks filter by their own level; never drop events here
     run_dir.mkdir(parents=True, exist_ok=True)
     for h in list(root.handlers):
         if getattr(h, "_pb_run_dir", None) == str(run_dir):
@@ -192,7 +206,9 @@ def _ensure_filters(logger: logging.Logger, secrets: Iterable[str]) -> None:
         h.addFilter(RedactSecretsFilter(secrets))
 
 
-def event(logger: logging.Logger, name: str, message: str, level: int = logging.INFO, **fields: Any) -> None:
+def event(
+    logger: logging.Logger, name: str, message: str, level: int = logging.INFO, **fields: Any
+) -> None:
     """Log a structured event. Unknown fields are dropped to keep the schema stable."""
     extra = {"event": name}
     for k, v in fields.items():
@@ -201,7 +217,9 @@ def event(logger: logging.Logger, name: str, message: str, level: int = logging.
     logger.log(level, message, extra=extra)
 
 
-def read_events(run_dir: Path, tail: int | None = None, level: str | None = None) -> list[dict[str, Any]]:
+def read_events(
+    run_dir: Path, tail: int | None = None, level: str | None = None
+) -> list[dict[str, Any]]:
     path = run_dir / EVENTS_FILENAME
     if not path.exists():
         return []

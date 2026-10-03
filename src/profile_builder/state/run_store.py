@@ -59,6 +59,11 @@ CREATE TABLE IF NOT EXISTS chunks (
   UNIQUE(url, ordinal)
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_hash ON chunks(text_hash);
+CREATE TABLE IF NOT EXISTS paragraphs (
+  url TEXT NOT NULL,
+  text_hash TEXT NOT NULL,
+  PRIMARY KEY (url, text_hash)
+);
 CREATE TABLE IF NOT EXISTS evidence (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   field_path TEXT NOT NULL,
@@ -261,9 +266,18 @@ class RunStore:
                  cache_file=excluded.cache_file, error_code=excluded.error_code,
                  error=excluded.error, selected=excluded.selected, fetched_at=excluded.fetched_at""",
             (
-                page.url, page.final_url, page.status, page.http_status, page.title,
-                page.content_hash, page.char_count, page.cache_file, page.error_code,
-                page.error, int(page.selected), page.fetched_at,
+                page.url,
+                page.final_url,
+                page.status,
+                page.http_status,
+                page.title,
+                page.content_hash,
+                page.char_count,
+                page.cache_file,
+                page.error_code,
+                page.error,
+                int(page.selected),
+                page.fetched_at,
             ),
         )
 
@@ -294,15 +308,24 @@ class RunStore:
     @staticmethod
     def _page_from_row(row: sqlite3.Row) -> PageRecord:
         return PageRecord(
-            url=row["url"], final_url=row["final_url"], status=row["status"],
-            http_status=row["http_status"], title=row["title"], content_hash=row["content_hash"],
-            char_count=row["char_count"] or 0, cache_file=row["cache_file"],
-            error_code=row["error_code"], error=row["error"], selected=bool(row["selected"]),
+            url=row["url"],
+            final_url=row["final_url"],
+            status=row["status"],
+            http_status=row["http_status"],
+            title=row["title"],
+            content_hash=row["content_hash"],
+            char_count=row["char_count"] or 0,
+            cache_file=row["cache_file"],
+            error_code=row["error_code"],
+            error=row["error"],
+            selected=bool(row["selected"]),
             fetched_at=row["fetched_at"],
         )
 
     # ---- chunks --------------------------------------------------------------------
-    def replace_chunks(self, url: str, chunks: list[tuple[int, str, str, str, np.ndarray | None]]) -> None:
+    def replace_chunks(
+        self, url: str, chunks: list[tuple[int, str, str, str, np.ndarray | None]]
+    ) -> None:
         """chunks: (ordinal, heading, text, text_hash, embedding)."""
         self._conn.execute("DELETE FROM chunks WHERE url=?", (url,))
         self._conn.executemany(
@@ -313,8 +336,22 @@ class RunStore:
             ],
         )
 
-    def chunk_hashes(self) -> set[str]:
-        return {r["text_hash"] for r in self._conn.execute("SELECT text_hash FROM chunks")}
+    def chunk_hashes(self, exclude_url: str | None = None) -> set[str]:
+        rows = self._conn.execute("SELECT text_hash FROM chunks WHERE url<>?", (exclude_url or "",))
+        return {r["text_hash"] for r in rows}
+
+    def replace_paragraphs(self, url: str, hashes: set[str]) -> None:
+        self._conn.execute("DELETE FROM paragraphs WHERE url=?", (url,))
+        self._conn.executemany(
+            "INSERT OR IGNORE INTO paragraphs(url, text_hash) VALUES (?,?)",
+            [(url, h) for h in hashes],
+        )
+
+    def paragraph_hashes(self, exclude_url: str | None = None) -> set[str]:
+        rows = self._conn.execute(
+            "SELECT text_hash FROM paragraphs WHERE url<>?", (exclude_url or "",)
+        )
+        return {r["text_hash"] for r in rows}
 
     def list_chunks(self, url: str | None = None) -> list[ChunkRecord]:
         if url:
@@ -328,8 +365,13 @@ class RunStore:
             emb = np.frombuffer(r["embedding"], dtype=np.float32) if r["embedding"] else None
             out.append(
                 ChunkRecord(
-                    id=r["id"], url=r["url"], ordinal=r["ordinal"], heading=r["heading"] or "",
-                    text=r["text"], text_hash=r["text_hash"], embedding=emb,
+                    id=r["id"],
+                    url=r["url"],
+                    ordinal=r["ordinal"],
+                    heading=r["heading"] or "",
+                    text=r["text"],
+                    text_hash=r["text_hash"],
+                    embedding=emb,
                 )
             )
         return out
@@ -340,7 +382,10 @@ class RunStore:
         now = time.time()
         self._conn.executemany(
             "INSERT INTO evidence(field_path, kind, source_url, excerpt, created_at) VALUES (?,?,?,?,?)",
-            [(r["field_path"], "website", r.get("source_url"), r.get("excerpt"), now) for r in rows],
+            [
+                (r["field_path"], "website", r.get("source_url"), r.get("excerpt"), now)
+                for r in rows
+            ],
         )
 
     def add_evidence(
@@ -448,9 +493,10 @@ class RunStore:
         return out
 
     def has_warning(self, code: str) -> bool:
-        return self._conn.execute(
-            "SELECT 1 FROM warnings WHERE code=? LIMIT 1", (code,)
-        ).fetchone() is not None
+        return (
+            self._conn.execute("SELECT 1 FROM warnings WHERE code=? LIMIT 1", (code,)).fetchone()
+            is not None
+        )
 
     def upsert_conflict(self, field_path: str, claims: list[dict[str, Any]], summary: str) -> None:
         self._conn.execute(
@@ -500,7 +546,9 @@ class RunStore:
         return self._conn.execute("SELECT COUNT(*) AS n FROM drafts").fetchone()["n"]
 
     # ---- usage ---------------------------------------------------------------------
-    def add_usage(self, kind: str, model: str, input_tokens: int, output_tokens: int, cost_usd: float) -> None:
+    def add_usage(
+        self, kind: str, model: str, input_tokens: int, output_tokens: int, cost_usd: float
+    ) -> None:
         self._conn.execute(
             "INSERT INTO usage(kind, model, input_tokens, output_tokens, cost_usd, created_at) VALUES (?,?,?,?,?,?)",
             (kind, model, input_tokens, output_tokens, cost_usd, time.time()),
@@ -515,8 +563,11 @@ class RunStore:
             "SELECT COUNT(*) AS n FROM usage WHERE kind='model'"
         ).fetchone()["n"]
         return {
-            "calls": row["calls"], "model_calls": model_calls, "input_tokens": row["tin"],
-            "output_tokens": row["tout"], "cost_usd": float(row["cost"]),
+            "calls": row["calls"],
+            "model_calls": model_calls,
+            "input_tokens": row["tin"],
+            "output_tokens": row["tout"],
+            "cost_usd": float(row["cost"]),
         }
 
     def total_cost(self) -> float:

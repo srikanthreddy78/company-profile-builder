@@ -65,7 +65,9 @@ def build_agent(ctx: ToolContext, model: BaseChatModel, checkpointer: SqliteSave
     settings = ctx.settings
     backend = StateBackend()
     middleware = [
-        FilesystemMiddleware(backend=backend, tools=FILESYSTEM_TOOLS),  # replaces the default by name
+        FilesystemMiddleware(
+            backend=backend, tools=FILESYSTEM_TOOLS
+        ),  # replaces the default by name
         *build_middleware(settings, ctx.store),
     ]
     return create_deep_agent(

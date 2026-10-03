@@ -86,7 +86,9 @@ def default_scraper_factory(fixtures_dir: Path | None) -> ScraperFactory:
         if fixtures_dir is not None:
             return FixtureScraper(fixtures_dir)
         if not settings.has_firecrawl():
-            raise RuntimeError("FIRECRAWL_API_KEY is not set (put it in .env or the environment), or use --fixtures DIR")
+            raise RuntimeError(
+                "FIRECRAWL_API_KEY is not set (put it in .env or the environment), or use --fixtures DIR"
+            )
         return FirecrawlScraper(settings.firecrawl_api_key.get_secret_value())  # type: ignore[union-attr]
 
     return factory
@@ -144,13 +146,17 @@ class Runner:
         event(log, "run_started", f"run {run_id} started for {start_url}", kind="start")
         log.info("settings: %s", store.get_run().settings)
         ctx, agent, config = self._build(run_id, run_dir, store, start_url, product, self.settings)
-        self.console.print(f"[bold]Run id:[/bold] {run_id}  [dim](resume later with: {self._resume_cmd(run_id)})[/dim]")
+        self.console.print(
+            f"[bold]Run id:[/bold] {run_id}  [dim](resume later with: {self._resume_cmd(run_id)})[/dim]"
+        )
         initial = {
             "messages": [
                 HumanMessage(
                     content=render_initial_message(
-                        start_url=start_url, product_focus=product,
-                        max_pages=self.settings.max_pages, max_questions=self.settings.max_questions,
+                        start_url=start_url,
+                        product_focus=product,
+                        max_pages=self.settings.max_pages,
+                        max_questions=self.settings.max_questions,
                     )
                 )
             ]
@@ -168,15 +174,31 @@ class Runner:
         clean_overrides = {k: v for k, v in overrides.items() if v is not None}
         if clean_overrides:
             store.update_settings(settings.snapshot())
-            store.add_warning("SETTINGS_OVERRIDDEN_ON_RESUME", f"limits changed on resume: {clean_overrides}")
+            store.add_warning(
+                "SETTINGS_OVERRIDDEN_ON_RESUME", f"limits changed on resume: {clean_overrides}"
+            )
         self.settings = settings
         self._attach_logging(run_id, run_dir)
-        event(log, "run_started", f"run {run_id} resumed (status={run.status}, stage={run.stage})", kind="resume")
+        event(
+            log,
+            "run_started",
+            f"run {run_id} resumed (status={run.status}, stage={run.stage})",
+            kind="resume",
+        )
         if run.status in {"complete", "partial", "failed"}:
             latest = store.latest_draft()
-            render_summary(self.console, store, latest[1] if latest else None, run.status, run.output_path)
-            return RunOutcome(run_id, run.status, run.output_path, message=f"run already finished with status {run.status}; use `export` to re-export")
-        ctx, agent, config = self._build(run_id, run_dir, store, run.start_url, run.product_focus, settings)
+            render_summary(
+                self.console, store, latest[1] if latest else None, run.status, run.output_path
+            )
+            return RunOutcome(
+                run_id,
+                run.status,
+                run.output_path,
+                message=f"run already finished with status {run.status}; use `export` to re-export",
+            )
+        ctx, agent, config = self._build(
+            run_id, run_dir, store, run.start_url, run.product_focus, settings
+        )
         snap = agent.get_state(config)
         if snap.interrupts:
             intr = snap.interrupts[0]
@@ -187,7 +209,18 @@ class Runner:
         if snap.next:
             return self._run(ctx, agent, config, None)
         if not snap.values:
-            initial = {"messages": [HumanMessage(content=render_initial_message(start_url=run.start_url, product_focus=run.product_focus, max_pages=settings.max_pages, max_questions=settings.max_questions))]}
+            initial = {
+                "messages": [
+                    HumanMessage(
+                        content=render_initial_message(
+                            start_url=run.start_url,
+                            product_focus=run.product_focus,
+                            max_pages=settings.max_pages,
+                            max_questions=settings.max_questions,
+                        )
+                    )
+                ]
+            }
             return self._run(ctx, agent, config, initial)
         return self._finish(ctx, agent, config)
 
@@ -198,14 +231,28 @@ class Runner:
         store = RunStore(run_dir)
         run = store.get_run()
         self._attach_logging(run_id, run_dir)
-        ctx = self._context(run_id, run_dir, store, run.start_url, run.product_focus, Settings.from_snapshot(run.settings), scraper=None)
+        ctx = self._context(
+            run_id,
+            run_dir,
+            store,
+            run.start_url,
+            run.product_focus,
+            Settings.from_snapshot(run.settings),
+            scraper=None,
+        )
         forced = run.status not in {"complete"}
         try:
             summary = finalize(ctx, forced_partial=forced)
         except FatalProfileError as exc:
             return RunOutcome(run_id, "failed", message=str(exc))
         latest = store.latest_draft()
-        render_summary(self.console, store, latest[1] if latest else None, summary["status"], summary["output_path"])
+        render_summary(
+            self.console,
+            store,
+            latest[1] if latest else None,
+            summary["status"],
+            summary["output_path"],
+        )
         return RunOutcome(run_id, summary["status"], summary["output_path"])
 
     # ---- internals -----------------------------------------------------------------
@@ -218,16 +265,45 @@ class Runner:
         attach_run_sinks(run_dir, secrets_)
         set_run_context(run_id=run_id, stage="init")
 
-    def _context(self, run_id: str, run_dir: Path, store: RunStore, start_url: str, product: str | None, settings: Settings, scraper: Scraper | None) -> ToolContext:
+    def _context(
+        self,
+        run_id: str,
+        run_dir: Path,
+        store: RunStore,
+        start_url: str,
+        product: str | None,
+        settings: Settings,
+        scraper: Scraper | None,
+    ) -> ToolContext:
         embeddings = self.embeddings_factory(settings)
-        index = HybridIndex(store, embeddings, embedding_model=settings.embedding_model, use_embeddings=settings.use_embeddings)
+        index = HybridIndex(
+            store,
+            embeddings,
+            embedding_model=settings.embedding_model,
+            use_embeddings=settings.use_embeddings,
+        )
         return ToolContext(
-            settings=settings, store=store, scraper=scraper,  # type: ignore[arg-type]
-            index=index, robots=RobotsChecker(enabled=True), run_dir=run_dir, run_id=run_id,
-            start_url=start_url, product_focus=product, check_dns=self.check_dns,
+            settings=settings,
+            store=store,
+            scraper=scraper,  # type: ignore[arg-type]
+            index=index,
+            robots=RobotsChecker(enabled=True),
+            run_dir=run_dir,
+            run_id=run_id,
+            start_url=start_url,
+            product_focus=product,
+            check_dns=self.check_dns,
         )
 
-    def _build(self, run_id: str, run_dir: Path, store: RunStore, start_url: str, product: str | None, settings: Settings):
+    def _build(
+        self,
+        run_id: str,
+        run_dir: Path,
+        store: RunStore,
+        start_url: str,
+        product: str | None,
+        settings: Settings,
+    ):
         scraper = self.scraper_factory(settings)
         ctx = self._context(run_id, run_dir, store, start_url, product, settings, scraper)
         model = self.model_factory(settings)
@@ -261,10 +337,14 @@ class Runner:
         event(log, "run_finished", "run paused by user during interview", status=PAUSED)
         latest = ctx.store.latest_draft()
         hint = f"Progress is saved. Continue with:\n  {self._resume_cmd(ctx.run_id)}"
-        render_summary(self.console, ctx.store, latest[1] if latest else None, PAUSED, None, resume_hint=hint)
+        render_summary(
+            self.console, ctx.store, latest[1] if latest else None, PAUSED, None, resume_hint=hint
+        )
         return RunOutcome(ctx.run_id, PAUSED, resume_hint=self._resume_cmd(ctx.run_id))
 
-    def _run(self, ctx: ToolContext, agent: Any, config: dict[str, Any], initial: Any) -> RunOutcome:
+    def _run(
+        self, ctx: ToolContext, agent: Any, config: dict[str, Any], initial: Any
+    ) -> RunOutcome:
         ctx.store.set_status("running")
         try:
             result = agent.invoke(initial, config, durability="sync")
@@ -286,10 +366,24 @@ class Runner:
             log.error("run interrupted by error: %s: %s", type(exc).__name__, exc, exc_info=True)
             ctx.store.set_status("interrupted")
             ctx.store.add_warning("RUN_INTERRUPTED", f"{type(exc).__name__}: {str(exc)[:300]}")
-            hint = f"The run stopped on an error and can be resumed:\n  {self._resume_cmd(ctx.run_id)}"
+            hint = (
+                f"The run stopped on an error and can be resumed:\n  {self._resume_cmd(ctx.run_id)}"
+            )
             latest = ctx.store.latest_draft()
-            render_summary(self.console, ctx.store, latest[1] if latest else None, "interrupted", None, resume_hint=hint)
-            return RunOutcome(ctx.run_id, "interrupted", message=f"{type(exc).__name__}: {exc}", resume_hint=self._resume_cmd(ctx.run_id))
+            render_summary(
+                self.console,
+                ctx.store,
+                latest[1] if latest else None,
+                "interrupted",
+                None,
+                resume_hint=hint,
+            )
+            return RunOutcome(
+                ctx.run_id,
+                "interrupted",
+                message=f"{type(exc).__name__}: {exc}",
+                resume_hint=self._resume_cmd(ctx.run_id),
+            )
 
     def _finish(self, ctx: ToolContext, agent: Any, config: dict[str, Any]) -> RunOutcome:
         store = ctx.store
@@ -301,15 +395,31 @@ class Runner:
         model_calls = int(values.get("thread_model_call_count", 0) or 0)
         limit_hit = False
         if model_calls >= self.settings.max_model_calls:
-            store.add_warning("LIMIT_MODEL_CALLS_REACHED", f"model call limit of {self.settings.max_model_calls} reached")
-            event(log, "limit_reached", "model call limit reached", level=logging.WARNING, kind="model_calls", count=model_calls)
+            store.add_warning(
+                "LIMIT_MODEL_CALLS_REACHED",
+                f"model call limit of {self.settings.max_model_calls} reached",
+            )
+            event(
+                log,
+                "limit_reached",
+                "model call limit reached",
+                level=logging.WARNING,
+                kind="model_calls",
+                count=model_calls,
+            )
             limit_hit = True
         if store.has_warning("BUDGET_EXCEEDED"):
             limit_hit = True
         if not limit_hit and store.get_counter("finalize_nudges") < MAX_FINALIZE_NUDGES:
             store.increment_counter("finalize_nudges")
             log.info("agent stopped without finalizing; nudging once")
-            nudge = {"messages": [HumanMessage(content="You stopped before exporting. If a draft exists, call finalize_profile now; otherwise call save_profile_draft with what the evidence supports, then finalize_profile.")]}
+            nudge = {
+                "messages": [
+                    HumanMessage(
+                        content="You stopped before exporting. If a draft exists, call finalize_profile now; otherwise call save_profile_draft with what the evidence supports, then finalize_profile."
+                    )
+                ]
+            }
             return self._run(ctx, agent, config, nudge)
         try:
             summary = finalize(ctx, forced_partial=True)
@@ -331,7 +441,9 @@ class Runner:
         render_summary(self.console, ctx.store, latest[1] if latest else None, "failed", None)
         self.console.print(f"[bold red]Error:[/bold red] {message}")
         if latest:
-            self.console.print(f"[dim]A valid earlier draft exists; export it with: python -m profile_builder export --run-id {ctx.run_id}[/dim]")
+            self.console.print(
+                f"[dim]A valid earlier draft exists; export it with: python -m profile_builder export --run-id {ctx.run_id}[/dim]"
+            )
         return RunOutcome(ctx.run_id, "failed", message=message)
 
     def _maybe_save_fixtures(self, ctx: ToolContext) -> None:
@@ -344,11 +456,15 @@ class Runner:
                 continue
             path = ctx.pages_dir / rec.cache_file
             if path.exists():
-                FixtureScraper.write_page(out, ScrapedPage.from_json(path.read_text(encoding="utf-8")))
+                FixtureScraper.write_page(
+                    out, ScrapedPage.from_json(path.read_text(encoding="utf-8"))
+                )
                 n += 1
         disc = ctx.run_dir / DISCOVERY_FILENAME
         if disc.exists():
             import json
 
-            FixtureScraper.write_map(out, [LinkCandidate(**d) for d in json.loads(disc.read_text(encoding="utf-8"))])
+            FixtureScraper.write_map(
+                out, [LinkCandidate(**d) for d in json.loads(disc.read_text(encoding="utf-8"))]
+            )
         log.info("saved %d fixture pages to %s", n, out)

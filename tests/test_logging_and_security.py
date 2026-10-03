@@ -33,7 +33,14 @@ def test_events_carry_context_and_redact_secrets(tmp_path):
     attach_run_sinks(run_dir, [secret, fc])
     set_run_context(run_id="pb-20260101-abc123", stage="scrape")
     log = get_logger("test")
-    event(log, "page_fetch", f"fetched with key {secret}", attempt=2, url="https://x.example/", status="ok")
+    event(
+        log,
+        "page_fetch",
+        f"fetched with key {secret}",
+        attempt=2,
+        url="https://x.example/",
+        status="ok",
+    )
     try:
         raise RuntimeError(f"Authorization: Bearer {fc} failed")
     except RuntimeError:
@@ -69,7 +76,10 @@ def test_atomic_write_and_terminal_escape(tmp_path):
     path = tmp_path / "out" / "x.json"
     atomic_write_text(path, "{}")
     assert path.read_text() == "{}" and not list(path.parent.glob(".tmp-*"))
-    assert "[/bold]" not in safe_text("[bold]hi[/bold]\x1b[31mred\x1b[0m\x07") and "red" in safe_text("\x1b[31mred")
+    from rich.text import Text
+
+    rendered = Text.from_markup(safe_text("[bold]hi[/bold]\x1b[31mred\x1b[0m\x07")).plain
+    assert rendered == "[bold]hi[/bold]red"  # markup neutralized, ANSI/control stripped
     assert sanitize_answer("  yes\x00\x1b[2J  ") == "yes"
     assert len(sanitize_answer("a" * 5000)) == 2000
 
