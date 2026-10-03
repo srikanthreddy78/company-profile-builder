@@ -15,8 +15,7 @@ echo piped input):
 
 ```
 $ uv run python -m profile_builder start --url https://www.fortanix.com/ --product "Confidential Computing Platform" --tier quality
-INFO     run pb-20261002-ulvek5 started for https://www.fortanix.com/
-Run id: pb-20261002-ulvek5  (resume later with: python -m profile_builder resume
+Run id: pb-20261002-lotlt2  (resume later with: python -m profile_builder resume
 INFO     stage → discover
 INFO     indexed https://www.fortanix.com/ (28985 chars, 20 chunks, 0 repeated
 INFO     30 candidates from map+homepage_links (24 dropped)
@@ -28,15 +27,15 @@ INFO     stage → research
 INFO     search_pages finished
 …
 INFO     stage → draft
-INFO     draft v1 saved (60 evidence rows, 0 rejected, 3 gaps)
+INFO     draft v1 saved (59 evidence rows, 1 rejected, 6 gaps)
 INFO     stage → interview
 ╭──────────────────────────────── Question 1/5 ────────────────────────────────╮
-│ For this profile, who typically buys Fortanix Confidential Computing         │
-│ Platform in your target accounts?                                            │
+│ For the Confidential Computing Platform, who typically makes the buying      │
+│ decision on the customer side?                                               │
 │                                                                              │
-│ Why this is unclear: The website shows enterprise and regulated-industry use │
-│ cases, but it does not clearly identify the decision-makers responsible for  │
-│ purchasing this product.                                                     │
+│ Why this is unclear: The website shows regulated-industry use cases and      │
+│ technical platform details, but it does not clearly identify the buyer roles │
+│ for this product.                                                            │
 │                                                                              │
 │ Affects: customer.buyers                                                     │
 │                                                                              │
@@ -46,14 +45,14 @@ INFO     stage → interview
 …
 INFO     profile exported (complete) →
 ╭────────────────────────── Company Profile Builder ───────────────────────────╮
-│ Run            pb-20261002-ulvek5                                            │
+│ Run            pb-20261002-lotlt2                                            │
 │ Website        https://www.fortanix.com/                                     │
 │ Product focus  Confidential Computing Platform                               │
 │ Status         COMPLETE                                                      │
 │ Pages          10 fetched · 0 skipped · 0 failed                             │
-│ Questions      3 asked (max 5)                                               │
-│ Model          gpt-5.4 · 21 calls · 277,449 in / 7,521 out                   │
-│ Est. cost      $0.2504 (no budget cap)                                       │
+│ Questions      2 asked (max 5)                                               │
+│ Model          gpt-5.4 · 17 calls · 206,581 in / 5,866 out                   │
+│ Est. cost      $0.1973 (no budget cap)                                       │
 │ Output         /Users/srikanth/projects/company-profile-builder/.runs/pb-20… │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```

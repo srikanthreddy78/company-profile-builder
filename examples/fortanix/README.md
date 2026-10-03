@@ -17,7 +17,7 @@ uv run python -m profile_builder resume --run-id <run-id>
 | `transcript.txt` | The terminal session (`start` plus each `resume`), including the question panels and the final summary. |
 | `events.jsonl` / `run.log` | Structured and plain logs: stages, every model and tool attempt with duration/tokens/cost, retries, interrupts, committed answers, warnings. Secrets are redacted. |
 
-Result: status **complete**, 10 pages fetched, 3 interview questions asked (buyers, users, claims to avoid; the agent stopped early because no useful question remained), 21 model calls with `gpt-5.4`, estimated cost $0.25. At export, 71 of 71 populated fields are grounded with per-item evidence and the run produced no warnings. The artifacts are from a single live session on the final code (`transcript.txt` is that session).
+Result: status **complete**, 10 pages fetched, 2 interview questions asked (buyers and users; the agent stopped early because no useful question remained), 17 model calls with `gpt-5.4`, estimated cost $0.1973. At export, 68 of 68 populated fields are grounded, with evidence recorded per list item and per feature subfield; warnings: EVIDENCE_REJECTED. The artifacts are from a single live session on the final code (`transcript.txt` is that session).
 
 grounding rule (in `evidence.json` a single row such as `customer.buyers` still covers a whole
 list; the current code records `customer.buyers[0]`, `[1]`, … and omits items the excerpt does

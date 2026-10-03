@@ -1,11 +1,5 @@
-INFO     run pb-20261002-ulvek5 started for https://www.fortanix.com/           
-INFO     settings: {'max_pages': 10, 'max_questions': 5, 'model': None, 'tier': 
-         'quality', 'embedding_model': 'text-embedding-3-small',                
-         'use_embeddings': True, 'budget_usd': None, 'scrape_timeout_ms': 30000,
-         'max_retries': 2, 'log_level': 'INFO', 'model_id': 'gpt-5.4',          
-         'max_model_calls': 70, 'max_scrape_calls': 5}                          
-Run id: pb-20261002-ulvek5  (resume later with: python -m profile_builder resume
---run-id pb-20261002-ulvek5)
+Run id: pb-20261002-lotlt2  (resume later with: python -m profile_builder resume
+--run-id pb-20261002-lotlt2)
 INFO     model call ok                                                          
 INFO     stage → discover                                                       
 INFO     indexed https://www.fortanix.com/ (28985 chars, 20 chunks, 0 repeated  
@@ -30,11 +24,11 @@ INFO     indexed https://www.fortanix.com/customers/beekeeperai-case-study
 INFO     indexed https://www.fortanix.com/customers/goldman-sachs-case-study    
          (17911 chars, 4 chunks, 21 repeated blocks dropped)                    
 INFO     indexed                                                                
-         https://www.fortanix.com/solutions/use-case/secure-data-driven-innovati
-         on (19226 chars, 6 chunks, 23 repeated blocks dropped)                 
+         https://www.fortanix.com/solutions/industry/data-security-for-healthcar
+         e (19975 chars, 13 chunks, 19 repeated blocks dropped)                 
 INFO     indexed                                                                
          https://www.fortanix.com/solutions/industry/data-security-for-banking-a
-         nd-financial-services (20793 chars, 13 chunks, 20 repeated blocks      
+         nd-financial-services (20793 chars, 10 chunks, 25 repeated blocks      
          dropped)                                                               
 INFO     scrape_pages finished                                                  
 INFO     model call ok                                                          
@@ -53,27 +47,23 @@ INFO     read_page finished
 INFO     model call ok                                                          
 INFO     read_page finished                                                     
 INFO     model call ok                                                          
-INFO     read_page finished                                                     
-INFO     model call ok                                                          
-INFO     search_pages finished                                                  
-INFO     model call ok                                                          
-INFO     search_pages finished                                                  
-INFO     model call ok                                                          
 INFO     stage → draft                                                          
-INFO     draft v1 saved (60 evidence rows, 0 rejected, 3 gaps)                  
+WARNING  product.features_and_capabilities[3].name: excerpt does not mention the
+         field value; quote the passage the value comes from                    
+INFO     draft v1 saved (59 evidence rows, 1 rejected, 6 gaps)                  
 INFO     save_profile_draft finished                                            
 INFO     model call ok                                                          
 INFO     stage → interview                                                      
-INFO     asking user (q1): For this profile, who typically buys Fortanix        
-         Confidential Computing Platform in your target accounts?               
+INFO     asking user (q1): For the Confidential Computing Platform, who         
+         typically makes the buying decision on the customer side?              
 INFO     ask_user paused for user input                                         
 ╭──────────────────────────────── Question 1/5 ────────────────────────────────╮
-│ For this profile, who typically buys Fortanix Confidential Computing         │
-│ Platform in your target accounts?                                            │
+│ For the Confidential Computing Platform, who typically makes the buying      │
+│ decision on the customer side?                                               │
 │                                                                              │
-│ Why this is unclear: The website shows enterprise and regulated-industry use │
-│ cases, but it does not clearly identify the decision-makers responsible for  │
-│ purchasing this product.                                                     │
+│ Why this is unclear: The website shows regulated-industry use cases and      │
+│ technical platform details, but it does not clearly identify the buyer roles │
+│ for this product.                                                            │
 │                                                                              │
 │ Affects: customer.buyers                                                     │
 │                                                                              │
@@ -82,14 +72,14 @@ INFO     ask_user paused for user input
 > 
 INFO     run paused by user during interview                                    
 ╭────────────────────────── Company Profile Builder ───────────────────────────╮
-│ Run            pb-20261002-ulvek5                                            │
+│ Run            pb-20261002-lotlt2                                            │
 │ Website        https://www.fortanix.com/                                     │
 │ Product focus  Confidential Computing Platform                               │
 │ Status         PAUSED                                                        │
 │ Pages          10 fetched · 0 skipped · 0 failed                             │
 │ Questions      0 asked (max 5)                                               │
-│ Model          gpt-5.4 · 14 calls · 141,486 in / 7,030 out                   │
-│ Est. cost      $0.1963 (no budget cap)                                       │
+│ Model          gpt-5.4 · 11 calls · 105,852 in / 5,436 out                   │
+│ Est. cost      $0.1522 (no budget cap)                                       │
 ╰──────────────────────────────────────────────────────────────────────────────╯
           Coverage           
 ┏━━━━━━━━━━━━━━━━━━┳━━━━━━━━┓
@@ -100,36 +90,50 @@ INFO     run paused by user during interview
 │ customer         │    5/7 │
 │ content_evidence │    4/4 │
 │ brand            │    3/4 │
-│ grounded fields  │  60/60 │
+│ grounded fields  │  59/60 │
 └──────────────────┴────────┘
-                               Remaining gaps (3)                               
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Field                          ┃ What is missing                             ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ customer.buyers                │ who makes the purchasing decision           │
-│ customer.users                 │ who uses the product day to day             │
-│ brand.terms_or_claims_to_avoid │ claims or terms the company does not want   │
-│                                │ used                                        │
-└────────────────────────────────┴─────────────────────────────────────────────┘
+                               Remaining gaps (5)                               
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Field                                 ┃ What is missing                      ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ customer.buyers                       │ who makes the purchasing decision    │
+│ customer.users                        │ who uses the product day to day      │
+│ brand.terms_or_claims_to_avoid        │ claims or terms the company does not │
+│                                       │ want used                            │
+│ product.features_and_capabilities[3]… │ how it works of capability           │
+│                                       │ 'Multi-environment coverage' is      │
+│                                       │ unknown                              │
+│ product.features_and_capabilities[4]… │ how it works of capability           │
+│                                       │ 'Confidential AI protection' is      │
+│                                       │ unknown                              │
+└───────────────────────────────────────┴──────────────────────────────────────┘
+                                  Warnings (1)                                  
+┏━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Code              ┃ Message                                                  ┃
+┡━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ EVIDENCE_REJECTED │ product.features_and_capabilities[3].name: excerpt does  │
+│                   │ not mention the field value; quote the passage the value │
+│                   │ comes from                                               │
+└───────────────────┴──────────────────────────────────────────────────────────┘
 ╭─────────────────────────────────── Resume ───────────────────────────────────╮
 │ Progress is saved. Continue with:                                            │
-│   python -m profile_builder resume --run-id pb-20261002-ulvek5               │
+│   python -m profile_builder resume --run-id pb-20261002-lotlt2               │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-INFO     run pb-20261002-ulvek5 resumed (status=paused, stage=interview)        
+INFO     run pb-20261002-lotlt2 resumed (status=paused, stage=interview)        
 ╭──────────────────────────────── Question 1/5 ────────────────────────────────╮
-│ For this profile, who typically buys Fortanix Confidential Computing         │
-│ Platform in your target accounts?                                            │
+│ For the Confidential Computing Platform, who typically makes the buying      │
+│ decision on the customer side?                                               │
 │                                                                              │
-│ Why this is unclear: The website shows enterprise and regulated-industry use │
-│ cases, but it does not clearly identify the decision-makers responsible for  │
-│ purchasing this product.                                                     │
+│ Why this is unclear: The website shows regulated-industry use cases and      │
+│ technical platform details, but it does not clearly identify the buyer roles │
+│ for this product.                                                            │
 │                                                                              │
 │ Affects: customer.buyers                                                     │
 │                                                                              │
 │ Answer, or type skip · idk · exit (save and resume later)                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-> INFO     asking user (q1): For this profile, who typically buys Fortanix        
-         Confidential Computing Platform in your target accounts?               
+> INFO     asking user (q1): For the Confidential Computing Platform, who         
+         typically makes the buying decision on the customer side?              
 INFO     q1 answered                                                            
 INFO     ask_user finished                                                      
 INFO     model call ok                                                          
@@ -138,16 +142,15 @@ INFO     draft v2 updated (1 fields)
 INFO     apply_profile_updates finished                                         
 INFO     model call ok                                                          
 INFO     stage → interview                                                      
-INFO     asking user (q2): Who are the primary day-to-day users of the Fortanix 
-         Confidential Computing Platform?                                       
+INFO     asking user (q2): Who are the primary day-to-day users of the          
+         Confidential Computing Platform after purchase?                        
 INFO     ask_user paused for user input                                         
 ╭──────────────────────────────── Question 2/5 ────────────────────────────────╮
-│ Who are the primary day-to-day users of the Fortanix Confidential Computing  │
-│ Platform?                                                                    │
+│ Who are the primary day-to-day users of the Confidential Computing Platform  │
+│ after purchase?                                                              │
 │                                                                              │
-│ Why this is unclear: The website explains technical capabilities and         │
-│ industry use cases, but it does not clearly distinguish the hands-on users   │
-│ from the executive buyers.                                                   │
+│ Why this is unclear: The website explains the platform and its industries,   │
+│ but it does not clearly separate hands-on users from the buyer roles.        │
 │                                                                              │
 │ Affects: customer.users                                                      │
 │                                                                              │
@@ -156,14 +159,14 @@ INFO     ask_user paused for user input
 > 
 INFO     run paused by user during interview                                    
 ╭────────────────────────── Company Profile Builder ───────────────────────────╮
-│ Run            pb-20261002-ulvek5                                            │
+│ Run            pb-20261002-lotlt2                                            │
 │ Website        https://www.fortanix.com/                                     │
 │ Product focus  Confidential Computing Platform                               │
 │ Status         PAUSED                                                        │
 │ Pages          10 fetched · 0 skipped · 0 failed                             │
 │ Questions      1 asked (max 5)                                               │
-│ Model          gpt-5.4 · 16 calls · 179,475 in / 7,168 out                   │
-│ Est. cost      $0.2116 (no budget cap)                                       │
+│ Model          gpt-5.4 · 13 calls · 138,407 in / 5,571 out                   │
+│ Est. cost      $0.1676 (no budget cap)                                       │
 ╰──────────────────────────────────────────────────────────────────────────────╯
           Coverage           
 ┏━━━━━━━━━━━━━━━━━━┳━━━━━━━━┓
@@ -174,35 +177,48 @@ INFO     run paused by user during interview
 │ customer         │    6/7 │
 │ content_evidence │    4/4 │
 │ brand            │    3/4 │
-│ grounded fields  │  64/64 │
+│ grounded fields  │  63/64 │
 └──────────────────┴────────┘
-                               Remaining gaps (2)                               
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Field                          ┃ What is missing                             ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ customer.users                 │ who uses the product day to day             │
-│ brand.terms_or_claims_to_avoid │ claims or terms the company does not want   │
-│                                │ used                                        │
-└────────────────────────────────┴─────────────────────────────────────────────┘
+                               Remaining gaps (4)                               
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Field                                 ┃ What is missing                      ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ customer.users                        │ who uses the product day to day      │
+│ brand.terms_or_claims_to_avoid        │ claims or terms the company does not │
+│                                       │ want used                            │
+│ product.features_and_capabilities[3]… │ how it works of capability           │
+│                                       │ 'Multi-environment coverage' is      │
+│                                       │ unknown                              │
+│ product.features_and_capabilities[4]… │ how it works of capability           │
+│                                       │ 'Confidential AI protection' is      │
+│                                       │ unknown                              │
+└───────────────────────────────────────┴──────────────────────────────────────┘
+                                  Warnings (1)                                  
+┏━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Code              ┃ Message                                                  ┃
+┡━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ EVIDENCE_REJECTED │ product.features_and_capabilities[3].name: excerpt does  │
+│                   │ not mention the field value; quote the passage the value │
+│                   │ comes from                                               │
+└───────────────────┴──────────────────────────────────────────────────────────┘
 ╭─────────────────────────────────── Resume ───────────────────────────────────╮
 │ Progress is saved. Continue with:                                            │
-│   python -m profile_builder resume --run-id pb-20261002-ulvek5               │
+│   python -m profile_builder resume --run-id pb-20261002-lotlt2               │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-INFO     run pb-20261002-ulvek5 resumed (status=paused, stage=interview)        
+INFO     run pb-20261002-lotlt2 resumed (status=paused, stage=interview)        
 ╭──────────────────────────────── Question 2/5 ────────────────────────────────╮
-│ Who are the primary day-to-day users of the Fortanix Confidential Computing  │
-│ Platform?                                                                    │
+│ Who are the primary day-to-day users of the Confidential Computing Platform  │
+│ after purchase?                                                              │
 │                                                                              │
-│ Why this is unclear: The website explains technical capabilities and         │
-│ industry use cases, but it does not clearly distinguish the hands-on users   │
-│ from the executive buyers.                                                   │
+│ Why this is unclear: The website explains the platform and its industries,   │
+│ but it does not clearly separate hands-on users from the buyer roles.        │
 │                                                                              │
 │ Affects: customer.users                                                      │
 │                                                                              │
 │ Answer, or type skip · idk · exit (save and resume later)                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-> INFO     asking user (q2): Who are the primary day-to-day users of the Fortanix 
-         Confidential Computing Platform?                                       
+> INFO     asking user (q2): Who are the primary day-to-day users of the          
+         Confidential Computing Platform after purchase?                        
 INFO     q2 answered                                                            
 INFO     ask_user finished                                                      
 INFO     model call ok                                                          
@@ -210,33 +226,26 @@ INFO     stage → draft
 INFO     draft v3 updated (1 fields)                                            
 INFO     apply_profile_updates finished                                         
 INFO     model call ok                                                          
-INFO     stage → interview                                                      
-INFO     asking user (q3): Are there any specific terms or claims your team     
-         wants this profile to avoid when describing the Confidential Computing 
-INFO     ask_user paused for user input                                         
-╭──────────────────────────────── Question 3/5 ────────────────────────────────╮
-│ Are there any specific terms or claims your team wants this profile to avoid │
-│ when describing the Confidential Computing Platform?                         │
-│                                                                              │
-│ Why this is unclear: The website establishes preferred language like         │
-│ Confidential Computing, secure enclaves, and control plane, but it does not  │
-│ state any prohibited terms or claims.                                        │
-│                                                                              │
-│ Affects: brand.terms_or_claims_to_avoid                                      │
-│                                                                              │
-│ Answer, or type skip · idk · exit (save and resume later)                    │
-╰──────────────────────────────────────────────────────────────────────────────╯
-> 
-INFO     run paused by user during interview                                    
+INFO     draft v4 updated (1 fields)                                            
+INFO     apply_profile_updates finished                                         
+INFO     model call ok                                                          
+INFO     stage → finalize                                                       
+INFO     profile exported (complete) →                                          
+         /Users/srikanth/projects/company-profile-builder/.runs/pb-20261002-lotl
+         t2/company_brain.json                                                  
+INFO     stage → done                                                           
+INFO     finalize_profile finished                                              
+INFO     model call ok                                                          
 ╭────────────────────────── Company Profile Builder ───────────────────────────╮
-│ Run            pb-20261002-ulvek5                                            │
+│ Run            pb-20261002-lotlt2                                            │
 │ Website        https://www.fortanix.com/                                     │
 │ Product focus  Confidential Computing Platform                               │
-│ Status         PAUSED                                                        │
+│ Status         COMPLETE                                                      │
 │ Pages          10 fetched · 0 skipped · 0 failed                             │
 │ Questions      2 asked (max 5)                                               │
-│ Model          gpt-5.4 · 18 calls · 218,148 in / 7,321 out                   │
-│ Est. cost      $0.2287 (no budget cap)                                       │
+│ Model          gpt-5.4 · 17 calls · 206,581 in / 5,866 out                   │
+│ Est. cost      $0.1973 (no budget cap)                                       │
+│ Output         /Users/srikanth/projects/company-profile-builder/.runs/pb-20… │
 ╰──────────────────────────────────────────────────────────────────────────────╯
           Coverage           
 ┏━━━━━━━━━━━━━━━━━━┳━━━━━━━━┓
@@ -249,65 +258,24 @@ INFO     run paused by user during interview
 │ brand            │    3/4 │
 │ grounded fields  │  68/68 │
 └──────────────────┴────────┘
-                               Remaining gaps (1)                               
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Field                          ┃ What is missing                             ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ brand.terms_or_claims_to_avoid │ claims or terms the company does not want   │
-│                                │ used                                        │
-└────────────────────────────────┴─────────────────────────────────────────────┘
-╭─────────────────────────────────── Resume ───────────────────────────────────╮
-│ Progress is saved. Continue with:                                            │
-│   python -m profile_builder resume --run-id pb-20261002-ulvek5               │
-╰──────────────────────────────────────────────────────────────────────────────╯
-INFO     run pb-20261002-ulvek5 resumed (status=paused, stage=interview)        
-╭──────────────────────────────── Question 3/5 ────────────────────────────────╮
-│ Are there any specific terms or claims your team wants this profile to avoid │
-│ when describing the Confidential Computing Platform?                         │
-│                                                                              │
-│ Why this is unclear: The website establishes preferred language like         │
-│ Confidential Computing, secure enclaves, and control plane, but it does not  │
-│ state any prohibited terms or claims.                                        │
-│                                                                              │
-│ Affects: brand.terms_or_claims_to_avoid                                      │
-│                                                                              │
-│ Answer, or type skip · idk · exit (save and resume later)                    │
-╰──────────────────────────────────────────────────────────────────────────────╯
-> INFO     asking user (q3): Are there any specific terms or claims your team     
-         wants this profile to avoid when describing the Confidential Computing 
-INFO     q3 answered                                                            
-INFO     ask_user finished                                                      
-INFO     model call ok                                                          
-INFO     stage → draft                                                          
-INFO     draft v4 updated (1 fields)                                            
-INFO     apply_profile_updates finished                                         
-INFO     model call ok                                                          
-INFO     stage → finalize                                                       
-INFO     profile exported (complete) →                                          
-         /Users/srikanth/projects/company-profile-builder/.runs/pb-20261002-ulve
-         k5/company_brain.json                                                  
-INFO     stage → done                                                           
-INFO     finalize_profile finished                                              
-INFO     model call ok                                                          
-╭────────────────────────── Company Profile Builder ───────────────────────────╮
-│ Run            pb-20261002-ulvek5                                            │
-│ Website        https://www.fortanix.com/                                     │
-│ Product focus  Confidential Computing Platform                               │
-│ Status         COMPLETE                                                      │
-│ Pages          10 fetched · 0 skipped · 0 failed                             │
-│ Questions      3 asked (max 5)                                               │
-│ Model          gpt-5.4 · 21 calls · 277,449 in / 7,521 out                   │
-│ Est. cost      $0.2504 (no budget cap)                                       │
-│ Output         /Users/srikanth/projects/company-profile-builder/.runs/pb-20… │
-╰──────────────────────────────────────────────────────────────────────────────╯
-          Coverage           
-┏━━━━━━━━━━━━━━━━━━┳━━━━━━━━┓
-┃ Section          ┃ Filled ┃
-┡━━━━━━━━━━━━━━━━━━╇━━━━━━━━┩
-│ company          │    2/2 │
-│ product          │    5/5 │
-│ customer         │    7/7 │
-│ content_evidence │    4/4 │
-│ brand            │    4/4 │
-│ grounded fields  │  71/71 │
-└──────────────────┴────────┘
+                               Remaining gaps (3)                               
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Field                                 ┃ What is missing                      ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ brand.terms_or_claims_to_avoid        │ claims or terms the company does not │
+│                                       │ want used                            │
+│ product.features_and_capabilities[3]… │ how it works of capability           │
+│                                       │ 'Cross-cloud confidential computing  │
+│                                       │ control plane' is unknown            │
+│ product.features_and_capabilities[4]… │ how it works of capability           │
+│                                       │ 'Confidential AI protection' is      │
+│                                       │ unknown                              │
+└───────────────────────────────────────┴──────────────────────────────────────┘
+                                  Warnings (1)                                  
+┏━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Code              ┃ Message                                                  ┃
+┡━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ EVIDENCE_REJECTED │ product.features_and_capabilities[3].name: excerpt does  │
+│                   │ not mention the field value; quote the passage the value │
+│                   │ comes from                                               │
+└───────────────────┴──────────────────────────────────────────────────────────┘
