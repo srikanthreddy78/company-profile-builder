@@ -176,7 +176,12 @@ def prioritize_for_interview(
         items.append(g)
     for p in ungrounded[:5]:
         items.append(
-            Gap(p, UNGROUNDED_PRIORITY, "populated without verified evidence; confirm or cite", "ungrounded")
+            Gap(
+                p,
+                UNGROUNDED_PRIORITY,
+                "populated without verified evidence; confirm or cite",
+                "ungrounded",
+            )
         )
     items.sort(key=lambda g: g.priority, reverse=True)
     return [g.to_dict() for g in items[:limit]]
