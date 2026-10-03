@@ -80,3 +80,66 @@ def test_wrong_argument_types_are_reported_to_model(settings, acme_fixtures):
     runner, _, _ = make_runner(settings, steps, scraper=FixtureScraper(acme_fixtures))
     outcome = runner.start(f"{SITE}/")
     assert outcome.status == "complete"
+
+
+def test_later_thin_draft_cannot_erase_earlier_fields(settings, acme_fixtures):
+    """A second save_profile_draft that omits sections keeps the earlier values + evidence."""
+    thin = {
+        **DRAFT_PROFILE,
+        "content_evidence": {k: [] for k in DRAFT_PROFILE["content_evidence"]},
+        "brand": {k: [] for k in DRAFT_PROFILE["brand"]},
+    }
+    steps = [
+        *_prefix(),
+        tool_call(
+            "save_profile_draft", {"profile": DRAFT_PROFILE, "evidence": DRAFT_EVIDENCE}, "full"
+        ),
+        tool_call("save_profile_draft", {"profile": thin, "evidence": []}, "thin"),
+        tool_call("finalize_profile", {}),
+        AIMessage(content="done"),
+    ]
+    runner, _, _ = make_runner(settings, steps, scraper=FixtureScraper(acme_fixtures))
+    outcome = runner.start(f"{SITE}/")
+    assert outcome.status == "complete"
+    store = RunStore(settings.runs_dir / outcome.run_id)
+    import json
+
+    brain = json.loads((store.run_dir / "company_brain.json").read_text())
+    assert (
+        brain["content_evidence"]["customer_stories"]
+        == DRAFT_PROFILE["content_evidence"]["customer_stories"]
+    )
+    assert brain["brand"]["preferred_terms"] == ["confidential computing"]
+    assert any(
+        e["field_path"].startswith("content_evidence.customer_stories")
+        for e in store.list_evidence(include_superseded=False)
+    )
+
+
+def test_finalize_pushes_back_once_on_empty_sections(settings, acme_fixtures):
+    bare = {
+        **DRAFT_PROFILE,
+        "customer": {
+            k: ([] if isinstance(v, list) else "") for k, v in DRAFT_PROFILE["customer"].items()
+        },
+    }
+    seen = []
+
+    def after_finalize_attempt(messages):
+        from tests.conftest import last_tool_result
+
+        res = last_tool_result(messages)
+        seen.append(res)
+        return tool_call("finalize_profile", {}, "second")
+
+    steps = [
+        *_prefix(),
+        tool_call("save_profile_draft", {"profile": bare, "evidence": []}),
+        tool_call("finalize_profile", {}, "first"),
+        after_finalize_attempt,
+        AIMessage(content="done"),
+    ]
+    runner, _, _ = make_runner(settings, steps, scraper=FixtureScraper(acme_fixtures))
+    outcome = runner.start(f"{SITE}/")
+    assert outcome.status == "complete"
+    assert seen and seen[0]["ok"] is False and "customer" in seen[0]["advice"]

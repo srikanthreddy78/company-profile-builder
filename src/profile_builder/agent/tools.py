@@ -12,6 +12,7 @@ import copy
 import hashlib
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,6 +25,7 @@ from pydantic import ValidationError
 from profile_builder.config import (
     DISCOVERY_FILENAME,
     MAX_EVIDENCE_EXCERPT_CHARS,
+    MAX_FINALIZE_REFUSALS,
     MAX_PAGE_CHARS,
     MAX_REPAIR_ATTEMPTS,
     MAX_URLS_PER_SCRAPE_CALL,
@@ -33,17 +35,22 @@ from profile_builder.config import (
     PAGES_DIRNAME,
     SCRAPE_ATTEMPTS_PER_PAGE,
     SCRAPE_INTER_REQUEST_DELAY_S,
+    THIN_DRAFT_SECTION_FIELDS,
     Settings,
 )
 from profile_builder.logging_setup import event, get_logger, redact_text, set_run_context
 from profile_builder.retrieval.chunking import text_hash
 from profile_builder.retrieval.index import HybridIndex, tokenize
 from profile_builder.schema import (
+    FEATURE_LIST_PATH,
+    STRING_LIST_PATHS,
+    STRING_PATHS,
     CompanyBrain,
     FieldPathError,
     get_by_path,
     parse_field_path,
     set_by_path,
+    strip_unknown_keys,
 )
 from profile_builder.security import (
     atomic_write_text,
@@ -82,6 +89,12 @@ UNKNOWN_WORDS = frozenset(
     }
 )
 QUESTION_KINDS = ("product_selection", "gap", "conflict", "brand")
+_NUMBERED_ITEM_RE = re.compile(r"(?m)^\s*(?:\(?\d{1,2}[.)]|[a-d][.)]|[-•*])\s+\S")
+MAX_QUESTION_MARKS = 2  # a question plus one clarifying sub-question is fine; a list is not
+FINALIZE_GUARD_SECTIONS = frozenset({"product", "customer", "content_evidence"})
+OBSERVATION_PATHS = frozenset({"brand.voice_and_tone", "brand.writing_style"})
+STEM_CHARS = 5
+MIN_CONTENT_TOKEN_CHARS = 4
 TRANSIENT_CODES = frozenset(
     {"RATE_LIMITED", "TIMEOUT", "SERVER_ERROR", "NETWORK", "TRANSIENT", "HTTP_429", "HTTP_408"}
 )
@@ -151,6 +164,12 @@ class ToolContext:
         message = redact_text(message)
         self.store.add_warning(code, message, details or None)
         event(log, "warning", message, level=logging.WARNING, code=code)
+
+
+def is_multi_question(text: str) -> bool:
+    """True when a single ask_user call tries to bundle several questions."""
+    numbered = len(_NUMBERED_ITEM_RE.findall(text or ""))
+    return numbered >= 2 or (text or "").count("?") > MAX_QUESTION_MARKS
 
 
 def _json(obj: Any) -> str:
@@ -649,6 +668,17 @@ def make_tools(ctx: ToolContext) -> list[Any]:
             return _json(
                 {"ok": False, "error": "field_paths must name at least one contract field"}
             )
+        if is_multi_question(question):
+            return _json(
+                {
+                    "ok": False,
+                    "error": (
+                        "ask ONE focused question per call (this text bundles several numbered or "
+                        "question-marked items). Call ask_user again with the single most important "
+                        "question; follow up separately if still useful."
+                    ),
+                }
+            )
         normalized_q = " ".join((question or "").split()).lower()
         qid = hashlib.sha1(
             f"{ctx.run_id}|{kind}|{','.join(sorted(paths))}|{normalized_q}".encode(),
@@ -747,20 +777,25 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         )
 
     # ---- drafting ------------------------------------------------------------------
-    def _value_tokens(value: Any) -> set[str]:
-        if isinstance(value, dict):
-            value = " ".join(str(v) for v in value.values())
-        elif isinstance(value, list):
-            value = " ".join(
-                " ".join(map(str, v.values())) if isinstance(v, dict) else str(v) for v in value
-            )
-        return {t for t in tokenize(str(value)) if len(t) >= 4}
+    def _stems(text: str) -> set[str]:
+        """Content words reduced to a 5-char stem so inflections (key/keys, release/releases,
+        protect/protection) still count as overlap."""
+        return {t[:STEM_CHARS] for t in tokenize(text) if len(t) >= MIN_CONTENT_TOKEN_CHARS}
 
-    def _supports(value: Any, text: str) -> bool:
-        """An excerpt/answer supports a value if they share at least one content word (or the
-        value has no content words to compare)."""
-        vt = _value_tokens(value)
-        return not vt or bool(vt & set(tokenize(text)))
+    def _value_text(value: Any) -> str:
+        if isinstance(value, dict):
+            return " ".join(str(v) for v in value.values())
+        if isinstance(value, list):
+            return " ".join(_value_text(v) for v in value)
+        return str(value)
+
+    def _supports(field_path: str, value: Any, text: str) -> bool:
+        """An excerpt/answer supports a value if they share a content-word stem. Observed brand
+        patterns (tone, writing style) are exempt: their evidence is an illustrative passage."""
+        if field_path.split("[")[0] in OBSERVATION_PATHS:
+            return True
+        vt = _stems(_value_text(value))
+        return not vt or bool(vt & _stems(text))
 
     def _verify_website_evidence(
         profile: dict[str, Any], items: list[dict[str, Any]]
@@ -812,7 +847,7 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                     {"field_path": path, "reason": "excerpt is not a verbatim quote from that page"}
                 )
                 continue
-            if not _supports(value, excerpt):
+            if not _supports(path, value, excerpt):
                 rejected.append(
                     {
                         "field_path": path,
@@ -828,7 +863,7 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         event(
             log,
             "repair_attempt",
-            f"{what} invalid (attempt {attempts})",
+            f"{what} invalid (attempt {attempts}): " + " ; ".join(errors[:4])[:600],
             level=logging.WARNING,
             attempt=attempts,
             count=len(errors),
@@ -848,6 +883,37 @@ def make_tools(ctx: ToolContext) -> list[Any]:
             }
         )
 
+    def _thin_draft_advice(profile: dict[str, Any], *, strict: bool = False) -> str | None:
+        """Push back when the draft leaves sections empty although pages are indexed: the
+        interview must not be used for facts the website already establishes."""
+        from profile_builder.workflow.gaps import section_coverage
+
+        if not store.fetched_urls():
+            return None
+        threshold = 0 if strict else THIN_DRAFT_SECTION_FIELDS
+        sections = FINALIZE_GUARD_SECTIONS if strict else None
+        thin = [
+            sec
+            for sec, (filled, _total) in section_coverage(profile).items()
+            if filled <= threshold and sec != "company" and (sections is None or sec in sections)
+        ]
+        if not thin:
+            return None
+        hints = {
+            "product": '"what the platform does", "key features and capabilities", "how it works", "why choose / differentiators"',
+            "customer": '"who it is for", "industries and use cases", "challenges / problems solved", "outcomes and benefits", "compared to / alternatives"',
+            "content_evidence": '"case study results", "customers like", "awards, research, certifications", "demo, benchmarks, proof"',
+            "brand": '"tone of voice and recurring phrases" (read 2-3 page leads with read_page)',
+        }
+        lines = [
+            f"- {sec}: search_pages for {hints.get(sec, 'the relevant topics')}" for sec in thin
+        ]
+        return (
+            f"The draft leaves {len(thin)} section(s) nearly empty although {len(store.fetched_urls())} pages are indexed. "
+            "Do NOT ask the user about facts the website can answer. First gather evidence, then fill these via apply_profile_updates:\n"
+            + "\n".join(lines)
+        )
+
     def _gap_payload(profile: dict[str, Any]) -> dict[str, Any]:
         asked = {p for q in store.list_questions() for p in q["field_paths"]}
         grounding = grounding_report(profile, evidence_paths(store))
@@ -857,7 +923,9 @@ def make_tools(ctx: ToolContext) -> list[Any]:
             asked_paths=asked,
             ungrounded=grounding["ungrounded"],
         )
+        advice = _thin_draft_advice(profile)
         return {
+            **({"advice": advice} if advice else {}),
             "grounding": {
                 "grounded": grounding["grounded"],
                 "populated": grounding["populated"],
@@ -876,6 +944,12 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         validation result, grounding stats and the prioritized gaps to interview about."""
         ctx.set_stage("draft")
         data = copy.deepcopy(profile) if isinstance(profile, dict) else {}
+        data, unknown = strip_unknown_keys(data)
+        if unknown:
+            ctx.warn(
+                "UNKNOWN_KEYS_IGNORED",
+                f"draft contained keys outside the contract; ignored: {', '.join(unknown[:8])}",
+            )
         try:
             if isinstance(data.get("company"), dict) and not data["company"].get("website_url"):
                 data["company"]["website_url"] = ctx.start_url
@@ -883,8 +957,25 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         except ValidationError as exc:
             return _repair_or_fail(_format_validation_error(exc), "profile draft")
         clean = brain.model_dump(mode="json")
+        # Merge with the previous draft: a later draft may never erase a field that an earlier
+        # one filled (the model sometimes re-sends a thinner profile after the interview).
+        kept_from_previous: list[str] = []
+        previous = store.latest_draft()
+        if previous is not None:
+            _, prev = previous
+            for base in (*STRING_PATHS, *STRING_LIST_PATHS, FEATURE_LIST_PATH):
+                new_val, old_val = get_by_path(clean, base), get_by_path(prev, base)
+                if new_val in ("", [], None) and old_val not in ("", [], None):
+                    set_by_path(clean, base, copy.deepcopy(old_val))
+                    kept_from_previous.append(base)
+            clean = CompanyBrain.model_validate(clean).model_dump(mode="json")
+        restated = {
+            base
+            for base in (*STRING_PATHS, *STRING_LIST_PATHS, FEATURE_LIST_PATH)
+            if base not in kept_from_previous
+        }
         accepted, rejected = _verify_website_evidence(clean, evidence)
-        store.replace_website_evidence(accepted)
+        store.replace_website_evidence(accepted, only_fields=restated)
         for r in rejected:
             ctx.warn("EVIDENCE_REJECTED", f"{r['field_path']}: {r['reason']}")
         store.set_counter("repair_attempts", 0)
@@ -903,6 +994,8 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                 "version": version,
                 "evidence_accepted": len(accepted),
                 "evidence_rejected": rejected,
+                "kept_from_previous_draft": kept_from_previous,
+                "ignored_unknown_keys": unknown,
                 **payload,
                 "next": "ask focused questions for the top gaps/conflicts, or finalize_profile if none are worth asking",
             }
@@ -953,7 +1046,7 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                         }
                     )
                     continue
-                if not _supports(upd.get("value"), q["answer"] or ""):
+                if not _supports(path, upd.get("value"), q["answer"] or ""):
                     rejected.append(
                         {"field_path": path, "reason": "value does not reflect the user's answer"}
                     )
@@ -1098,6 +1191,14 @@ def make_tools(ctx: ToolContext) -> list[Any]:
     def finalize_profile() -> str:
         """Validate the latest draft, omit disputed unresolved claims, write company_brain.json
         plus evidence.json and report.md, and return the run summary. Call once at the end."""
+        latest = store.latest_draft()
+        if latest is not None and store.get_counter("finalize_refusals") < MAX_FINALIZE_REFUSALS:
+            advice = _thin_draft_advice(latest[1], strict=True)
+            if advice:
+                store.increment_counter("finalize_refusals")
+                return _json(
+                    {"ok": False, "error": "profile not ready to export", "advice": advice}
+                )
         ctx.set_stage("finalize")
         result = finalize(ctx)
         ctx.set_stage("done")

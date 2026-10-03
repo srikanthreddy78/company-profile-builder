@@ -34,19 +34,26 @@ def text_hash(text: str) -> str:
 
 
 def _clean_markdown(md: str) -> str:
+    """Drop images and reduce links to their text so the model never sees URL syntax (fewer
+    tokens, and quotes copied from excerpts stay verbatim relative to the page)."""
     md = _IMAGE_RE.sub("", md)
+    md = _LINK_RE.sub(r"\1", md)
     md = re.sub(r"\n{3,}", "\n\n", md)
     return md.strip()
 
 
+_NAV_LINE_RE = re.compile(r"^\s*(?:[-*+•]\s*)?[^.!?]{1,40}$")
+
+
 def _is_navigational(paragraph: str) -> bool:
-    """Mostly links / very short items → navigation, footer, cookie banners."""
-    links = _LINK_RE.findall(paragraph)
-    link_text = sum(len(t) for t in links)
-    plain = _LINK_RE.sub("", paragraph)
+    """Very short items, or blocks made of many short sentence-less lines (menus, footers,
+    cookie banners) → navigation noise."""
     if len(paragraph) < MIN_CHUNK_CHARS:
         return True
-    return bool(links) and link_text > 0.6 * max(len(plain) + link_text, 1)
+    lines = [ln for ln in paragraph.splitlines() if ln.strip()]
+    return bool(
+        len(lines) >= 4 and sum(1 for ln in lines if _NAV_LINE_RE.match(ln)) >= 0.75 * len(lines)
+    )
 
 
 def _split_long(text: str, max_chars: int, overlap: int) -> list[str]:

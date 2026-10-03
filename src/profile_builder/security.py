@@ -16,8 +16,10 @@ from profile_builder.config import MAX_ANSWER_CHARS, RUN_ID_PATTERN
 _RUN_ID_RE = re.compile(RUN_ID_PATTERN)
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_MD_IMAGE_RE = re.compile(r"!\[[^\]]*\](\([^)]*\))?")
 _MD_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
-_MD_NOISE_RE = re.compile(r"[*_`#>|]")
+_MD_NOISE_RE = re.compile(r"[*_`#>|\[\]]")
+_LIST_MARKER_RE = re.compile(r"(?m)^\s*(?:[-*+•]|\d+[.)])\s+")
 _WS_RE = re.compile(r"\s+")
 
 INJECTION_PATTERNS = [
@@ -106,7 +108,11 @@ def sanitize_answer(text: str) -> str:
 
 
 def normalize_for_match(text: str) -> str:
-    text = _MD_LINK_RE.sub(r"\1", text or "")
+    """Markdown-insensitive normalization: images removed, links reduced to their text,
+    brackets/emphasis/headings/list markers dropped, whitespace collapsed, case folded."""
+    text = _MD_IMAGE_RE.sub(" ", text or "")
+    text = _MD_LINK_RE.sub(r"\1", text)
+    text = _LIST_MARKER_RE.sub("", text)
     text = _MD_NOISE_RE.sub("", text)
     text = text.replace("’", "'").replace("“", '"').replace("”", '"')
     text = text.replace("–", "-").replace("—", "-")

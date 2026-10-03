@@ -165,3 +165,18 @@ def test_question_limit_is_enforced(settings, acme_fixtures):
     assert outcome.status == "complete" and asked == ["Regulated enterprises"]
     store = RunStore(settings.runs_dir / outcome.run_id)
     assert store.has_warning("LIMIT_QUESTIONS_REACHED") and store.questions_asked() == 1
+
+
+def test_multi_question_prompts_are_rejected():
+    from profile_builder.agent.tools import is_multi_question
+
+    assert is_multi_question(
+        "Please answer each:\n1) Who buys?\n2) Who uses?\n3) Which alternatives?"
+    )
+    assert is_multi_question(
+        "Who buys it? Who uses it? Which alternatives matter? Any terms to avoid?"
+    )
+    assert not is_multi_question(
+        "Which customer segment should this profile prioritize (banks or startups)?"
+    )
+    assert not is_multi_question("Who signs off on the purchase? For example a CISO or a CIO.")

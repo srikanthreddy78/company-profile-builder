@@ -42,6 +42,9 @@ PRIORITY: dict[str, int] = {
     "company.website_url": 20,
 }
 
+FEATURE_DETAIL_PRIORITY = 20
+UNGROUNDED_PRIORITY = 30
+
 REASONS: dict[str, str] = {
     "product.name": "which single product this profile covers",
     "product.description": "what the product actually does",
@@ -93,10 +96,12 @@ def empty_gaps(profile: dict[str, Any]) -> list[Gap]:
     for i, feat in enumerate(features):
         for sub in ("description", "how_it_works", "customer_benefit"):
             if not feat.get(sub):
+                # Mechanism/benefit details are low-value interview questions: the user rarely
+                # knows them better than the website, so they rank below preferences.
                 gaps.append(
                     Gap(
                         f"{FEATURE_LIST_PATH}[{i}].{sub}",
-                        PRIORITY[FEATURE_LIST_PATH] - 30 - (10 if sub == "how_it_works" else 0),
+                        FEATURE_DETAIL_PRIORITY - (5 if sub == "how_it_works" else 0),
                         f"{sub.replace('_', ' ')} of capability '{feat.get('name') or i}' is unknown",
                         "partial_feature",
                     )

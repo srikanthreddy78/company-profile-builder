@@ -11,22 +11,25 @@ answers; the evidence lives next to the profile in `evidence.json`.
 
 ```
 $ python -m profile_builder start --url https://www.fortanix.com/ --product "Confidential Computing Platform"
-Run id: pb-20261002-k3x9qa  (resume later with: python -m profile_builder resume --run-id pb-20261002-k3x9qa)
-stage → discover … 38 candidates from map+homepage_links
-stage → scrape   … indexed https://www.fortanix.com/platform (12 chunks)
-stage → draft    … draft v1 saved (31 evidence rows, 1 rejected, 6 gaps)
+Run id: pb-20261002-5bsvmi  (resume later with: python -m profile_builder resume --run-id pb-20261002-5bsvmi)
+INFO  stage → discover … 30 candidates from map+homepage_links (22 dropped)
+INFO  stage → scrape   … indexed https://www.fortanix.com/platform/confidential-computing-manager (18 chunks)
+INFO  stage → draft    … draft v1 saved (71 evidence rows, 2 rejected, 4 gaps)
 ╭─ Question 1/5 ───────────────────────────────────────────────────────────────╮
-│ The platform page targets regulated enterprises, while the solutions pages   │
-│ also address cloud providers. Which segment should this profile prioritize?  │
-│ Why this is unclear: two page groups describe different primary customers.   │
+│ For the Confidential Computing Platform, who typically makes the buying      │
+│ decision?                                                                    │
+│ Why this is unclear: The website establishes industries and technical        │
+│ capabilities, but it does not clearly say which role usually owns purchase   │
+│ decisions for this product.                                                  │
 │ Answer, or type skip · idk · exit (save and resume later)                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-> Regulated enterprises in finance and healthcare
+> CISO, CIO, Head of Data Security and Compliance, VP of Cloud Infrastructure
 …
 ╭─ Company Profile Builder ─────────────────────────────────────────────────────╮
-│ Status   COMPLETE   Pages 9 fetched · 1 skipped   Questions 4 asked (max 5)   │
-│ Model    gpt-5-mini · 29 calls · 61,204 in / 9,812 out   Est. cost $0.0352    │
-│ Output   .runs/pb-20261002-k3x9qa/company_brain.json                          │
+│ Status     COMPLETE   Pages 10 fetched   Questions 2 asked (max 5)            │
+│ Model      gpt-5.4 · 17 calls · 197,097 in / 4,503 out   Est. cost $0.1941    │
+│ grounded fields 75/79                                                         │
+│ Output     .runs/pb-20261002-5bsvmi/company_brain.json                        │
 ╰───────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -54,7 +57,12 @@ Outputs land in `.runs/<run_id>/`: `company_brain.json` (the contract, nothing e
 `evidence.json` (sources, excerpts, questions, warnings, conflicts, usage), `report.md`
 (coverage, gaps, pages, interview), `events.jsonl` and `run.log`.
 
-An example Fortanix run is committed under [`examples/fortanix/`](examples/fortanix/).
+An example Fortanix run (quality tier) is committed under [`examples/fortanix/`](examples/fortanix/)
+with its profile, evidence, report, logs and terminal transcript.
+
+**Model tiers.** `fast` (`gpt-5-mini`, default) completes a run for roughly $0.03–0.08 but varies
+more between runs; `quality` (`gpt-5.4`) costs about $0.15–0.25 and grounds and phrases more
+consistently. Use `--tier quality` for a profile you intend to keep.
 
 ## Commands
 

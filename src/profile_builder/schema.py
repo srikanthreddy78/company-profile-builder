@@ -24,6 +24,9 @@ def _clean_str(value: Any) -> str:
     if not isinstance(value, str):
         raise ValueError(f"expected a string, got {type(value).__name__}")
     stripped = value.strip()
+    # Values are statements, not quotations: drop wrapping quote marks the model may copy over.
+    while len(stripped) >= 2 and stripped[0] in "\"“”'‘’" and stripped[-1] in "\"“”'‘’":
+        stripped = stripped[1:-1].strip()
     if stripped.lower() in FILLER_VALUES:
         raise ValueError(f'filler value {value!r} is not allowed; use "" for unknown')
     return stripped
@@ -288,6 +291,52 @@ def ancestors(path: str) -> list[str]:
     if index is not None:
         out.append(base)
     return out
+
+
+SECTION_KEYS: dict[str, tuple[str, ...]] = {
+    "company": tuple(Company.model_fields),
+    "product": tuple(Product.model_fields),
+    "customer": tuple(Customer.model_fields),
+    "content_evidence": tuple(ContentEvidence.model_fields),
+    "brand": tuple(Brand.model_fields),
+}
+
+
+def strip_unknown_keys(data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Drop keys that are not part of the contract (the model occasionally invents
+    `..._additional` fields). Returns the cleaned copy and the dropped key paths."""
+    dropped: list[str] = []
+    out: dict[str, Any] = {}
+    for key, value in (data or {}).items():
+        if key in ("artifact", "version"):
+            out[key] = value
+        elif key in SECTION_KEYS and isinstance(value, dict):
+            section: dict[str, Any] = {}
+            for sub, sub_val in value.items():
+                if sub in SECTION_KEYS[key]:
+                    section[sub] = sub_val
+                else:
+                    dropped.append(f"{key}.{sub}")
+            if key == "product" and isinstance(section.get("features_and_capabilities"), list):
+                feats = []
+                for i, feat in enumerate(section["features_and_capabilities"]):
+                    if isinstance(feat, dict):
+                        keep = {k: v for k, v in feat.items() if k in FEATURE_FIELDS}
+                        dropped.extend(
+                            f"product.features_and_capabilities[{i}].{k}"
+                            for k in feat
+                            if k not in FEATURE_FIELDS
+                        )
+                        feats.append(keep)
+                    else:
+                        feats.append(feat)
+                section["features_and_capabilities"] = feats
+            out[key] = section
+        elif key in SECTION_KEYS:
+            out[key] = value  # wrong type: let validation report it
+        else:
+            dropped.append(key)
+    return out, dropped
 
 
 def json_schema() -> dict[str, Any]:

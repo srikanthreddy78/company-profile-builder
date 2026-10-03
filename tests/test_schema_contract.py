@@ -112,3 +112,35 @@ def test_field_paths():
     assert get_by_path(data, "product.features_and_capabilities[0].how_it_works") == "SGX"
     with pytest.raises(FieldPathError):
         set_by_path(data, "customer.buyers[5]", "gap")
+
+
+def test_strip_unknown_keys():
+    from profile_builder.schema import strip_unknown_keys
+
+    data = {
+        **TEMPLATE,
+        "content_evidence": {
+            **TEMPLATE["content_evidence"],
+            "proprietary_insights_or_examples_additional": ["x"],
+        },
+        "extra_top": 1,
+    }
+    data["product"] = {
+        **TEMPLATE["product"],
+        "features_and_capabilities": [
+            {
+                "name": "A",
+                "description": "",
+                "how_it_works": "",
+                "customer_benefit": "",
+                "source": "u",
+            }
+        ],
+    }
+    cleaned, dropped = strip_unknown_keys(data)
+    assert set(dropped) == {
+        "content_evidence.proprietary_insights_or_examples_additional",
+        "extra_top",
+        "product.features_and_capabilities[0].source",
+    }
+    CompanyBrain.model_validate(cleaned)

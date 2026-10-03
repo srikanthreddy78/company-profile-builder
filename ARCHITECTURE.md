@@ -127,10 +127,28 @@ Settings are snapshotted into the run at `start`; `resume` reuses them unless
 - **Prices are a table in code.** Cost shown is an estimate; the budget cap is therefore
   approximate too.
 
+## What the live runs taught (and changed)
+
+Nine live runs against fortanix.com shaped the final behavior:
+
+- A 60 s model timeout cut off the first full draft from a reasoning model → 180 s.
+- The agent interviewed before researching → the draft tool now reports thin sections with
+  concrete search queries, and `finalize_profile` refuses once if a core section is empty.
+- A later, thinner draft erased earlier work → drafts merge; an empty value never overwrites a
+  filled one, and evidence is replaced per field rather than wholesale.
+- Markdown link/image syntax made honest quotes fail verification → links are reduced to their
+  text before chunking and the matcher ignores brackets, images and list markers.
+- Feature-detail gaps produced weak questions ("write how it works") → priorities favour
+  decisions and preferences; questions must be single (bundled lists are rejected).
+- The model invented an extra key once and failed the run → unknown keys are stripped with a
+  warning before validation.
+- Firecrawl's free tier rate-limits bursts → longer backoff and 1.5 s pacing between fetches.
+
 ## Time spent
 
-Roughly 10 hours in total: ~1.5 h reading the brief and verifying the current Deep Agents /
-LangGraph / Firecrawl APIs, ~5 h implementation, ~2 h tests and fixtures, ~1 h live run and
-tuning, ~0.5 h docs. AI coding assistance (Claude Code) was used throughout; every module was
-reviewed and the tricky parts (interrupt replay, middleware ordering, SSRF guard) were
-checked against the library sources.
+Roughly 14 hours in total: ~1.5 h reading the brief and verifying the current Deep Agents /
+LangGraph / Firecrawl APIs against their sources, ~5 h implementation, ~2.5 h tests and fixtures,
+~1 h independent security review and fixes, ~3 h live runs and tuning (nine runs, ~$0.60 of API
+spend in total), ~1 h docs. AI coding assistance (Claude Code) was used throughout; every module
+was reviewed and the tricky parts (interrupt replay, middleware ordering, SSRF guard, evidence
+verification) were checked against library sources and live behaviour.

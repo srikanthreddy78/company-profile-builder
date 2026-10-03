@@ -35,7 +35,7 @@ RETRY_INITIAL_DELAY_S = 2.0
 RETRY_MAX_DELAY_S = 30.0
 RETRY_BACKOFF_FACTOR = 3.0  # 2s, 6s: Firecrawl's free tier rate-limits bursts of ~10 requests
 SCRAPE_INTER_REQUEST_DELAY_S = 1.5  # polite pacing between live fetches inside one tool call
-MODEL_REQUEST_TIMEOUT_S = 60
+MODEL_REQUEST_TIMEOUT_S = 180  # a full structured draft from a reasoning model can take >60s
 
 # Discovery ----------------------------------------------------------------------------
 FIRECRAWL_API_URL = "https://api.firecrawl.dev"  # pinned: never taken from the environment
@@ -46,7 +46,7 @@ MAX_URLS_PER_SCRAPE_CALL = 10
 SCRAPE_ATTEMPTS_PER_PAGE = 2  # cap on fetch attempts (incl. failures) = MAX_PAGES * this
 ROBOTS_MAX_BYTES = 512 * 1024
 ROBOTS_MAX_REDIRECTS = 5
-MAX_CANDIDATES_TO_MODEL = 40
+MAX_CANDIDATES_TO_MODEL = 30
 MAX_URL_LENGTH = 2048
 DEFAULT_EXCLUDE_URL_PATTERNS: tuple[str, ...] = (
     r"\.(png|jpe?g|gif|svg|webp|ico|pdf|zip|gz|mp4|mp3|css|js|xml|json|txt)(\?|$)",
@@ -97,8 +97,9 @@ CHUNK_TOKENS = 400
 CHUNK_OVERLAP_TOKENS = 60
 CHARS_PER_TOKEN = 4  # cheap estimate; exactness is not needed for chunk sizing
 SEARCH_K = 6
-MAX_EXCERPT_CHARS = 600
-MIN_EXCERPT_CHARS = 25  # shorter "quotes" cannot ground a claim
+MAX_EXCERPT_CHARS = 500
+MIN_EXCERPT_CHARS = 25
+THIN_DRAFT_SECTION_FIELDS = 1  # a section with <= this many filled fields counts as thin  # shorter "quotes" cannot ground a claim
 MAX_EVIDENCE_EXCERPT_CHARS = 2 * MAX_EXCERPT_CHARS
 MAX_READ_CHARS = 4000
 PAGE_LEAD_CHARS = 300
@@ -109,6 +110,7 @@ MAX_ANSWER_CHARS = 2000
 # Interview / validation ---------------------------------------------------------------
 MAX_REPAIR_ATTEMPTS = 1
 MAX_FINALIZE_NUDGES = 1
+MAX_FINALIZE_REFUSALS = 1  # finalize_profile pushes back once if sections are empty
 
 # Logging ------------------------------------------------------------------------------
 EVENTS_FILENAME = "events.jsonl"

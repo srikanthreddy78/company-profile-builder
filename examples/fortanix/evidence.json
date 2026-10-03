@@ -1,0 +1,470 @@
+{
+  "run_id": "pb-20261002-5bsvmi",
+  "generated_at": "2026-10-03T02:26:03Z",
+  "tool_version": "0.1.0",
+  "status": "complete",
+  "start_url": "https://www.fortanix.com/",
+  "product_focus": "Confidential Computing Platform",
+  "settings": {
+    "max_pages": 10,
+    "max_questions": 5,
+    "model": null,
+    "tier": "quality",
+    "embedding_model": "text-embedding-3-small",
+    "use_embeddings": true,
+    "budget_usd": null,
+    "scrape_timeout_ms": 30000,
+    "max_retries": 2,
+    "log_level": "INFO",
+    "model_id": "gpt-5.4",
+    "max_model_calls": 70,
+    "max_scrape_calls": 5
+  },
+  "pages": [
+    {
+      "url": "https://www.fortanix.com/",
+      "final_url": "https://www.fortanix.com/",
+      "status": "fetched",
+      "http_status": 200,
+      "title": "Securing Data in an AI world",
+      "chars": 28985,
+      "error_code": null,
+      "error": null
+    },
+    {
+      "url": "https://www.fortanix.com/platform/confidential-computing",
+      "final_url": "https://www.fortanix.com/faq/confidential-computing/confidential-computing-technology",
+      "status": "fetched",
+      "http_status": 200,
+      "title": "Confidential Computing Technology",
+      "chars": 49642,
+      "error_code": null,
+      "error": null
+    },
+    {
+      "url": "https://www.fortanix.com/platform/confidential-computing-manager",
+      "final_url": "https://www.fortanix.com/platform/confidential-computing-manager",
+      "status": "fetched",
+      "http_status": 200,
+      "title": "Confidential Computing Manager Platform | Fortanix",
+      "chars": 19445,
+      "error_code": null,
+      "error": null
+    },
+    {
+      "url": "https://www.fortanix.com/platform",
+      "final_url": "https://www.fortanix.com/platform",
+      "status": "fetched",
+      "http_status": 200,
+      "title": "Unified Data Security Platform | Fortanix Platform",
+      "chars": 21363,
+      "error_code": null,
+      "error": null
+    },
+    {
+      "url": "https://www.fortanix.com/customers",
+      "final_url": "https://www.fortanix.com/customers",
+      "status": "fetched",
+      "http_status": 200,
+      "title": "Customers",
+      "chars": 19388,
+      "error_code": null,
+      "error": null
+    },
+    {
+      "url": "https://www.fortanix.com/customers/goldman-sachs-case-study",
+      "final_url": "https://www.fortanix.com/customers/goldman-sachs-case-study",
+      "status": "fetched",
+      "http_status": 200,
+      "title": "Goldman Sachs Case Study  ",
+      "chars": 17911,
+      "error_code": null,
+      "error": null
+    },
+    {
+      "url": "https://www.fortanix.com/customers/beekeeperai-case-study",
+      "final_url": "https://www.fortanix.com/customers/beekeeperai-case-study",
+      "status": "fetched",
+      "http_status": 200,
+      "title": "BeeKeeperAI Case Study  ",
+      "chars": 18383,
+      "error_code": null,
+      "error": null
+    },
+    {
+      "url": "https://www.fortanix.com/company/about",
+      "final_url": "https://www.fortanix.com/company/about",
+      "status": "fetched",
+      "http_status": 200,
+      "title": "About",
+      "chars": 18306,
+      "error_code": null,
+      "error": null
+    },
+    {
+      "url": "https://www.fortanix.com/solutions/use-case/secure-data-driven-innovation",
+      "final_url": "https://www.fortanix.com/solutions/use-case/secure-data-driven-innovation",
+      "status": "fetched",
+      "http_status": 200,
+      "title": "Secure Data Driven Innovation",
+      "chars": 19226,
+      "error_code": null,
+      "error": null
+    },
+    {
+      "url": "https://www.fortanix.com/solutions/industry/data-security-for-banking-and-financial-services",
+      "final_url": "https://www.fortanix.com/solutions/industry/data-security-for-banking-and-financial-services",
+      "status": "fetched",
+      "http_status": 200,
+      "title": "Banking and Financial Services",
+      "chars": 20793,
+      "error_code": null,
+      "error": null
+    }
+  ],
+  "evidence": [
+    {
+      "field_path": "brand.preferred_terms",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform/confidential-computing-manager",
+      "excerpt": "Ensure data and AI models remain protected inside Trusted Execution Environments.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "brand.voice_and_tone",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/company/about",
+      "excerpt": "Fortanix is a data-first security company and a pioneer in Confidential Computing. We help enterprises discover, assess, and remediate data exposure risks across hybrid multicloud environments to maintain the privacy and compliance of their most sensitive and regulated data, wherever it may be.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "brand.writing_style",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform",
+      "excerpt": "Secure Your Data and AI Without Compromise",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "brand.writing_style",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform",
+      "excerpt": "- Encrypt data at-rest, in-transit, and in-use with a single platform.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "company.name",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/company/about",
+      "excerpt": "Fortanix is a data-first security company and a pioneer in Confidential Computing.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "company.website_url",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/company/about",
+      "excerpt": "Fortanix is a data-first security company and a pioneer in Confidential Computing.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "content_evidence.company_expertise",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/company/about",
+      "excerpt": "We put software and hardware security into billions of devices. 100+ security patents. 30+ papers in top conferences. USENIX, CCC, and Blackhat presenters.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "content_evidence.company_expertise",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform/confidential-computing",
+      "excerpt": "Fortanix is a founding member of the Confidential Computing Consortium of the Linux Foundation.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "content_evidence.customer_stories",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform/confidential-computing",
+      "excerpt": "BeeKeeper AI, a Fortanix customer, is leveraging the technology to speed up developing and deploying AI algorithms in healthcare. They can create high-quality algorithms to deliver optimal health and healthcare outcomes by removing the barriers to accessing critical clinical data.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "content_evidence.customer_stories",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/solutions/industry/data-security-for-banking-and-financial-services",
+      "excerpt": "Since Goldman Sachs was already a customer of Fortanix, we’ve seen the benefits of its technology first-hand. Every single business with sensitive data can relate to the challenges of data security and privacy, making them a potential customer of Fortanix.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "content_evidence.product_evidence",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform",
+      "excerpt": "Fortanix doesn’t just encrypt data at-rest and in-transit—the platform encrypts data in-use across any cloud application, storage, and on-prem environments by isolating critical processes in a secure enclave. Stay on top of it all with Confidential Computing Manager, a bird’s eye view with a granular set of controls for managing your trusted computing environments.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "content_evidence.product_evidence",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform/confidential-computing-manager",
+      "excerpt": "Use a single control plane to configure, attest, and monitor your entire Confidential Computing stack, CPUs and GPUs.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "content_evidence.proprietary_insights_or_examples",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform/confidential-computing-manager",
+      "excerpt": "Composite attestation across CPU and GPU to ensure no gaps exist between independently managed components.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "customer.buyers",
+      "kind": "interview",
+      "source_url": null,
+      "excerpt": null,
+      "question_id": "711d16bba805",
+      "answer": "CISO, CIO, Head of Data Security and Compliance, VP of Cloud Infrastructure",
+      "superseded": false
+    },
+    {
+      "field_path": "customer.desired_outcomes",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/solutions/use-case/secure-data-driven-innovation",
+      "excerpt": "Protect your data while putting it to work. Fortanix empowers you to safely leverage your data— wherever it is—to drive business innovation and improve experiences, while preventing data exposure.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "customer.existing_alternatives",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform/confidential-computing",
+      "excerpt": "Azure Confidential Computing provides access to Confidential Computing infrastructure, such as confidential VMs and hardware-backed TEEs. However, it primarily focuses on infrastructure availability within the Azure ecosystem.\n\nFortanix goes much further by acting as the control plane for Confidential Computing across clouds and environments.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "customer.problems",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform/confidential-computing",
+      "excerpt": "Confidential computing changes the data security game by protecting information when it’s most exposed, which is when it’s being processed. It uses hardware-based, trusted execution environments, or physical enclaves that keep data encrypted at runtime.\n\nWith this level of protection, even administrators or cloud operators can’t see sensitive data while it’s being used",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "customer.problems",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform/confidential-computing-manager",
+      "excerpt": "Provision, configure, and monitor your entire Confidential Computing infrastructure from one place. Have full control over workflows and policies, eliminate management complexity and fragmented tooling, and uphold performance as you scale.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "customer.target_customer",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform/confidential-computing",
+      "excerpt": "While all industries can benefit from Confidential Computing, highly regulated sectors and those with access to personal data can reap the most rewards.\n\nWith increasing data breaches, companies realize the importance of data protection in the current regulatory landscape, leading to adopting Confidential Computing in industries such as financial services, healthcare, technology, and government.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "customer.use_cases",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform/confidential-computing-manager",
+      "excerpt": "Create and manage Trusted Execution Environments to enforce security, sovereignty, and compliance across your AI infrastructure. Use a single control plane to configure, attest, and monitor your entire Confidential Computing stack, CPUs and GPUs. Eliminate operational complexity, the risk of unauthorized access, and exposure of data and AI models while in active use.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "customer.use_cases",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/customers/beekeeperai-case-study",
+      "excerpt": "BeeKeeperAI Accelerates Healthcare AI and Enables Secure Healthcare Data Collaboration with Fortanix Confidential Computing",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "customer.use_cases",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/solutions/industry/data-security-for-banking-and-financial-services",
+      "excerpt": "Protect sensitive financial and personally identifiable information (PII), accelerate digital transformation, and stay in compliance with global regulations and frameworks.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "customer.users",
+      "kind": "interview",
+      "source_url": null,
+      "excerpt": null,
+      "question_id": "ca54390cdc76",
+      "answer": "Security engineers, platform and DevOps engineers, cloud architects, and ML engineers running confidential AI workloads",
+      "superseded": false
+    },
+    {
+      "field_path": "product.description",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform/confidential-computing",
+      "excerpt": "Fortanix delivers a complete, enterprise-ready Confidential Computing platform — not just hardware access. Key advantages include proven leadership (Fortanix pioneered CC adoption before it became mainstream), end-to-end security that protects data, AI models, and secrets while in use, policy-driven control where keys are released only after cryptographic attestation, multi-cloud flexibility across cloud providers and on-premises environments, and AI-ready architecture with deep NVIDIA integration",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "product.differentiators",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform/confidential-computing",
+      "excerpt": "Fortanix delivers a complete, enterprise-ready Confidential Computing platform — not just hardware access.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "product.features_and_capabilities[0]",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform",
+      "excerpt": "Fortanix doesn’t just encrypt data at-rest and in-transit—the platform encrypts data in-use across any cloud application, storage, and on-prem environments by isolating critical processes in a secure enclave.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "product.features_and_capabilities[1]",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform/confidential-computing-manager",
+      "excerpt": "Provision, configure, and monitor your entire Confidential Computing infrastructure from one place. Have full control over workflows and policies, eliminate management complexity and fragmented tooling, and uphold performance as you scale.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "product.features_and_capabilities[2]",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform/confidential-computing",
+      "excerpt": "Fortanix goes much further by acting as the control plane for Confidential Computing across clouds and environments. Capabilities such as attestation verification, policy enforcement, and secure key release ensure that workloads run only in trusted environments.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "product.features_and_capabilities[4]",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/customers/beekeeperai-case-study",
+      "excerpt": "Fortanix makes it possible to enroll computing resources, in the cloud or on-premises, and deploy existing applications within a secure TEE in minutes.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "product.name",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform/confidential-computing-manager",
+      "excerpt": "Confidential Computing Manager # A Single Control Plane for Your Confidential Computing Stack",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    },
+    {
+      "field_path": "product.positioning",
+      "kind": "website",
+      "source_url": "https://www.fortanix.com/platform/confidential-computing",
+      "excerpt": "Fortanix goes much further by acting as the control plane for Confidential Computing across clouds and environments. Capabilities such as attestation verification, policy enforcement, and secure key release ensure that workloads run only in trusted environments.",
+      "question_id": null,
+      "answer": null,
+      "superseded": false
+    }
+  ],
+  "questions": [
+    {
+      "qid": "711d16bba805",
+      "n": 1,
+      "kind": "gap",
+      "question": "For the Confidential Computing Platform, who typically makes the buying decision?",
+      "why_unclear": "The website establishes industries and technical capabilities, but it does not clearly say which role usually owns purchase decisions for this product.",
+      "field_paths": [
+        "customer.buyers"
+      ],
+      "status": "answered",
+      "answer": "CISO, CIO, Head of Data Security and Compliance, VP of Cloud Infrastructure"
+    },
+    {
+      "qid": "ca54390cdc76",
+      "n": 2,
+      "kind": "gap",
+      "question": "Who are the primary day-to-day users of the Confidential Computing Platform?",
+      "why_unclear": "The site describes platform management and attestation workflows, but it does not clearly separate the hands-on users from the economic buyers.",
+      "field_paths": [
+        "customer.users"
+      ],
+      "status": "answered",
+      "answer": "Security engineers, platform and DevOps engineers, cloud architects, and ML engineers running confidential AI workloads"
+    }
+  ],
+  "conflicts": [],
+  "warnings": [
+    {
+      "code": "EVIDENCE_REJECTED",
+      "message": "product.features_and_capabilities[3]: excerpt is not a verbatim quote from that page",
+      "details": null
+    },
+    {
+      "code": "EVIDENCE_REJECTED",
+      "message": "customer.desired_outcomes: excerpt is not a verbatim quote from that page",
+      "details": null
+    }
+  ],
+  "gaps": [
+    {
+      "field_path": "brand.terms_or_claims_to_avoid",
+      "priority": 40,
+      "reason": "claims or terms the company does not want used",
+      "kind": "empty"
+    }
+  ],
+  "grounding": {
+    "populated": 79,
+    "grounded": 75,
+    "ungrounded": [
+      "product.features_and_capabilities[3].name",
+      "product.features_and_capabilities[3].description",
+      "product.features_and_capabilities[3].how_it_works",
+      "product.features_and_capabilities[3].customer_benefit"
+    ]
+  },
+  "usage": {
+    "calls": 26,
+    "model_calls": 16,
+    "input_tokens": 179966,
+    "output_tokens": 4385,
+    "cost_usd": 0.18574407999999998
+  }
+}

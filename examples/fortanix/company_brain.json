@@ -1,0 +1,134 @@
+{
+  "artifact": "company_brain",
+  "version": 1,
+  "company": {
+    "name": "Fortanix",
+    "website_url": "https://www.fortanix.com/"
+  },
+  "product": {
+    "name": "Confidential Computing Platform",
+    "description": "A confidential computing platform and control plane that protects data, AI models, and secrets while they are in use across cloud and on-premises environments.",
+    "positioning": "An enterprise-ready, multi-cloud confidential computing platform that goes beyond infrastructure access by providing policy-driven control, attestation verification, and secure key release for trusted execution environments.",
+    "features_and_capabilities": [
+      {
+        "name": "Trusted execution environment protection",
+        "description": "Protects data and workloads while they are being processed by isolating critical processes inside secure enclaves.",
+        "how_it_works": "Uses secure enclaves and trusted execution environments to keep data encrypted at runtime and isolate workloads from the OS, hypervisor, and privileged operators.",
+        "customer_benefit": "Keeps sensitive data protected during use, including against insider and cloud operator access."
+      },
+      {
+        "name": "Unified control plane",
+        "description": "Provides centralized management for confidential computing infrastructure and workflows.",
+        "how_it_works": "Lets teams provision, configure, attest, and monitor their confidential computing stack from one place.",
+        "customer_benefit": "Reduces fragmented tooling and management complexity while maintaining control at scale."
+      },
+      {
+        "name": "Attestation-based key release",
+        "description": "Verifies the integrity of the runtime environment before releasing keys.",
+        "how_it_works": "Uses cryptographic attestation and policy enforcement so keys are released only when workloads run in trusted environments.",
+        "customer_benefit": "Prevents unauthorized environments and privileged users from accessing protected data or model weights."
+      },
+      {
+        "name": "CPU and GPU composite attestation",
+        "description": "Verifies both CPU and GPU components for confidential AI and other accelerated workloads.",
+        "how_it_works": "Performs composite attestation across supported CPUs and GPUs to ensure no security gaps exist between independently managed components.",
+        "customer_benefit": "Extends trusted execution and secure key release to AI workloads that run across CPUs and GPUs."
+      },
+      {
+        "name": "Multi-cloud and on-prem deployment",
+        "description": "Supports confidential computing across cloud providers and on-premises environments.",
+        "how_it_works": "Allows customers to enroll computing resources in the cloud or on-premises and deploy existing applications within a secure TEE.",
+        "customer_benefit": "Gives organizations flexibility to protect sensitive workloads without being tied to one cloud or needing major application rewrites."
+      }
+    ],
+    "differentiators": [
+      "Acts as the control plane for confidential computing across clouds and environments rather than only providing infrastructure access.",
+      "Provides policy enforcement, attestation verification, and secure key release so workloads run only in trusted environments.",
+      "Offers an enterprise-ready platform designed to protect data, AI models, and secrets while in use.",
+      "Supports composite attestation across CPUs and GPUs for confidential AI workloads.",
+      "Enables deployment of existing applications within a secure TEE in minutes with no development or integration costs."
+    ]
+  },
+  "customer": {
+    "target_customer": "Enterprises and organizations that handle sensitive or regulated data, especially in highly regulated sectors such as financial services, healthcare, technology, and government.",
+    "buyers": [
+      "CISO",
+      "CIO",
+      "Head of Data Security and Compliance",
+      "VP of Cloud Infrastructure"
+    ],
+    "users": [
+      "Security engineers",
+      "Platform and DevOps engineers",
+      "Cloud architects",
+      "ML engineers running confidential AI workloads"
+    ],
+    "problems": [
+      "Sensitive data is exposed while being processed, even if it is encrypted at rest and in transit.",
+      "Organizations need to reduce insider, administrator, and cloud operator access to sensitive workloads.",
+      "Highly regulated organizations need stronger privacy, compliance, and data sovereignty controls.",
+      "Teams struggle to securely share or use sensitive data for AI, analytics, and innovation.",
+      "Organizations face operational complexity from fragmented confidential computing infrastructure and tooling."
+    ],
+    "use_cases": [
+      "Protecting applications and data while in use in secure enclaves.",
+      "Securing AI training and inference so data and model weights are not exposed during processing.",
+      "Enabling secure healthcare data collaboration for machine learning and AI development.",
+      "Protecting sensitive financial and personally identifiable information while accelerating digital transformation.",
+      "Supporting secure data-driven innovation and cross-organizational data sharing."
+    ],
+    "desired_outcomes": [
+      "Protect sensitive data, AI models, and secrets while they are in use.",
+      "Meet compliance and data sovereignty requirements such as GDPR, HIPAA, and similar regulations.",
+      "Reduce insider threat and privileged access risk.",
+      "Safely use data to innovate, collaborate, and build AI applications.",
+      "Simplify confidential computing operations and scale securely across environments."
+    ],
+    "existing_alternatives": [
+      "Cloud-provider confidential computing infrastructure such as Azure Confidential Computing.",
+      "Relying only on encryption at rest and in transit without protecting data in use."
+    ]
+  },
+  "content_evidence": {
+    "customer_stories": [
+      "BeeKeeperAI used Fortanix Confidential Computing to accelerate healthcare AI and enable secure healthcare data collaboration.",
+      "Goldman Sachs is cited as a customer with Fortanix technology benefits seen first-hand, though the case study focuses on DSM rather than this product specifically."
+    ],
+    "company_expertise": [
+      "Fortanix says it is a pioneer in Confidential Computing.",
+      "Fortanix cites 100+ security patents, 30+ papers in top conferences, and presentations at USENIX, CCC, and Blackhat.",
+      "Fortanix says it is a founding member of the Confidential Computing Consortium of the Linux Foundation."
+    ],
+    "product_evidence": [
+      "Fortanix says it encrypts data in use across cloud applications, storage, and on-prem environments by isolating critical processes in a secure enclave.",
+      "Fortanix says Confidential Computing Manager provides a single control plane to configure, attest, and monitor confidential computing infrastructure across CPUs and GPUs.",
+      "Fortanix says keys are released only after cryptographic attestation and policy checks are met."
+    ],
+    "proprietary_insights_or_examples": [
+      "Fortanix describes composite attestation across CPU and GPU to close security gaps between independently managed components.",
+      "Fortanix describes secure key release tied to verified firmware and software integrity."
+    ]
+  },
+  "brand": {
+    "voice_and_tone": [
+      "Security-focused",
+      "Enterprise-oriented",
+      "Compliance-conscious",
+      "Innovation-enabling"
+    ],
+    "writing_style": [
+      "Uses concise benefit-led statements",
+      "Frequently contrasts protection in-use with at-rest and in-transit",
+      "Uses technical security terminology such as attestation, secure enclave, and Trusted Execution Environments"
+    ],
+    "preferred_terms": [
+      "Confidential Computing",
+      "data in-use",
+      "Trusted Execution Environments",
+      "secure enclave",
+      "attestation",
+      "control plane"
+    ],
+    "terms_or_claims_to_avoid": []
+  }
+}

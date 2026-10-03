@@ -84,6 +84,26 @@ def test_atomic_write_and_terminal_escape(tmp_path):
     assert len(sanitize_answer("a" * 5000)) == 2000
 
 
+def test_excerpt_matching_ignores_markdown_syntax():
+    page = (
+        "Case Study\n# BeeKeeperAI Accelerates Healthcare AI with Fortanix ![bee keeper ai](https://x/i.png)\n\n"
+        "[Secure enclaves](https://a), such as\xa0[Intel SGX](https://b) are practical examples.\n\n"
+        "Composite attestation across CPU and GPU.\n\n- Intel TDX and AMD SEV-SNP CPUs\n- NVIDIA Blackwell GPUs\n"
+    )
+    assert excerpt_in_page(
+        "BeeKeeperAI Accelerates Healthcare AI with Fortanix ![bee keeper ai]", page
+    )
+    assert excerpt_in_page("[Secure enclaves], such as [Intel SGX] are practical examples.", page)
+    assert excerpt_in_page("Secure enclaves, such as Intel SGX are practical examples", page)
+    assert excerpt_in_page(
+        "Composite attestation across CPU and GPU.\n\nIntel TDX and AMD SEV-SNP CPUs\nNVIDIA Blackwell GPUs",
+        page,
+    )
+    assert not excerpt_in_page(
+        "Secure enclaves (such as Intel SGX or AMD SEV) are practical examples", page
+    )
+
+
 def test_excerpt_verification_and_injection():
     page = "# Title\n\nAcme **Vault** keeps data [encrypted](https://x) in use,\nat rest and in transit."
     assert excerpt_in_page("Acme Vault keeps data encrypted in use, at rest and in transit", page)
