@@ -15,7 +15,7 @@ transcript does not echo typed input):
 
 ```
 $ uv run python -m profile_builder start --url https://www.fortanix.com/ --product "Confidential Computing Platform" --tier quality
-INFO     run pb-20261002-5bsvmi started for https://www.fortanix.com/
+INFO     run pb-20261002-ulvek5 started for https://www.fortanix.com/
 Run id: pb-20261002-ulvek5  (resume later with: python -m profile_builder resume --run-id pb-20261002-ulvek5)
 INFO     stage → discover
 INFO     indexed https://www.fortanix.com/ (28985 chars, 19 chunks, 0 repeated blocks dropped)
@@ -47,7 +47,7 @@ INFO     stage → interview
 …
 INFO     profile exported (complete) → …/.runs/pb-20261002-ulvek5/company_brain.json
 ╭────────────────────────── Company Profile Builder ───────────────────────────╮
-│ Run            pb-20261002-5bsvmi                                            │
+│ Run            pb-20261002-ulvek5                                            │
 │ Website        https://www.fortanix.com/                                     │
 │ Product focus  Confidential Computing Platform                               │
 │ Status         COMPLETE                                                      │
