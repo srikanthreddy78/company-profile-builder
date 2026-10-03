@@ -28,6 +28,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from profile_builder.config import (
+    MAX_DISCOVER_CALLS,
     RETRY_BACKOFF_FACTOR,
     RETRY_INITIAL_DELAY_S,
     RETRY_MAX_DELAY_S,
@@ -211,8 +212,10 @@ class UntrustedContentMiddleware(AgentMiddleware):
             and isinstance(result.content, str)
             and result.status != "error"
         ):
+            # Neutralize any attempt by page content to close the delimiter early.
+            body = result.content.replace("<<<", "‹‹‹").replace(">>>", "›››")
             return result.model_copy(
-                update={"content": f"{UNTRUSTED_OPEN}\n{result.content}\n{UNTRUSTED_CLOSE}"}
+                update={"content": f"{UNTRUSTED_OPEN}\n{body}\n{UNTRUSTED_CLOSE}"}
             )
         return result
 
@@ -233,6 +236,9 @@ def build_middleware(settings: Settings, store: RunStore) -> list[AgentMiddlewar
             tool_name="scrape_pages",
             thread_limit=settings.max_scrape_calls,
             exit_behavior="continue",
+        ),
+        ToolCallLimitMiddleware(
+            tool_name="discover_pages", thread_limit=MAX_DISCOVER_CALLS, exit_behavior="continue"
         ),
         SoloAskUserGuardMiddleware(),
         ModelRetryMiddleware(

@@ -13,7 +13,7 @@ from typing import Any, Protocol
 
 import requests
 
-from profile_builder.config import USER_AGENT
+from profile_builder.config import FIRECRAWL_API_URL, USER_AGENT
 from profile_builder.logging_setup import get_logger
 from profile_builder.security import url_cache_name
 from profile_builder.web.url_guard import normalize_url
@@ -137,7 +137,7 @@ class FirecrawlScraper:
         from firecrawl import Firecrawl
 
         # The SDK's own retry loop is disabled so the middleware owns retries/backoff.
-        self._client = Firecrawl(api_key=api_key, max_retries=0)
+        self._client = Firecrawl(api_key=api_key, api_url=FIRECRAWL_API_URL, max_retries=0)
 
     def scrape(self, url: str, *, timeout_ms: int, with_links: bool = False) -> ScrapedPage:
         formats: list[Any] = ["markdown", "links"] if with_links else ["markdown"]
@@ -159,11 +159,16 @@ class FirecrawlScraper:
             raise PermanentScrapeError(
                 f"target returned HTTP {status}", code=f"HTTP_{status}", http_status=int(status)
             )
-        final_url = (
-            (getattr(meta, "source_url", None) or getattr(meta, "url", None) or url)
-            if meta
-            else url
-        )
+        # Firecrawl: `metadata.url` is where the engine actually ended up (after redirects);
+        # `metadata.source_url` is only the URL we asked for. process_page re-checks the final
+        # URL against the SSRF guard and the same-site rule.
+        # Firecrawl: `metadata.url` is where the engine actually ended up (after redirects);
+        # `metadata.source_url` is only the URL we asked for. process_page re-checks the final
+        # URL against the SSRF guard and the same-site rule.
+        final_url = (getattr(meta, "url", None) or "") if meta else ""
+        if not final_url:
+            log.debug("no final URL reported for %s; assuming no redirect", url)
+            final_url = url
         return ScrapedPage(
             url=url,
             final_url=final_url,

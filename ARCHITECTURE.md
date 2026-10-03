@@ -27,15 +27,17 @@ CLI (typer + rich)
 | Serial tool calls | `SerialToolCallsMiddleware` sets `parallel_tool_calls=False`; `SoloAskUserGuardMiddleware` rejects a bundled `ask_user` | — | — |
 | Untrusted content | `UntrustedContentMiddleware` frames web tool output | injection heuristics → `INJECTION_SUSPECTED` | — |
 | Logging | telemetry logs every model/tool attempt (duration, tokens, cost, status) | stage changes, page fetches, limits, questions, drafts | run start/finish, resume, failures |
-| Validation + repair | — | Pydantic `CompanyBrain`; one repair attempt (`MAX_REPAIR_ATTEMPTS`), then `FatalProfileError` | turns the fatal error into status `failed`, keeps state, never writes a profile |
-| Grounding | — | evidence must quote a fetched page verbatim; field paths allow-listed; conflicts tracked and omitted if unresolved | `inspect` shows evidence per field |
+| Validation + repair | — | Pydantic `CompanyBrain`; one consecutive repair attempt (`MAX_REPAIR_ATTEMPTS`, counter resets after a valid save), then `FatalProfileError` | turns the fatal error into status `failed`, keeps state, never writes a profile |
+| Grounding | — | evidence must quote a fetched page verbatim *and* mention the value it supports; interview evidence must come from a question that covered the field; field paths allow-listed; stale evidence superseded when a value changes; conflicts tracked and omitted if unresolved | `inspect` shows evidence per field |
 | Interview | — | `ask_user` calls `langgraph.types.interrupt`, commits the answer idempotently | shows the question, reads input, resumes with `Command(resume={interrupt_id: answer})` |
 
 Middleware order (first = outermost): `SerialToolCalls → [BudgetCap] → ModelCallLimit →
 ToolCallLimit(ask_user) → ToolCallLimit(scrape_pages) → SoloAskUserGuard → ModelRetry →
 ToolRetry → RunTelemetry → UntrustedContent`. Telemetry sits *inside* the retry middleware so
 each attempt is logged and charged. Deep Agents' own core stack stays in place except the
-filesystem middleware, which is replaced by a read-only instance (`ls`, `read_file`).
+filesystem middleware, which is replaced by a read-only instance (`ls`, `read_file`), and the
+default general-purpose subagent (`task` tool), which is disabled through a harness profile so
+no tool can run outside this stack.
 
 All custom middleware re-raises `GraphBubbleUp` (the base of `GraphInterrupt`) before any
 generic handler, so interrupts are never swallowed. The built-in retry middleware does the

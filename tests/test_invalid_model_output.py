@@ -38,7 +38,14 @@ def test_invalid_then_repaired(settings, acme_fixtures):
     outcome = runner.start(f"{SITE}/")
     assert outcome.status == "complete"
     store = RunStore(settings.runs_dir / outcome.run_id)
-    assert store.get_counter("repair_attempts") == 1
+    # the counter resets after a successful save (one *consecutive* repair is allowed);
+    # the attempt itself is recorded in the event log
+    assert store.get_counter("repair_attempts") == 0
+    from profile_builder.logging_setup import read_events
+
+    assert [
+        e["attempt"] for e in read_events(store.run_dir) if e.get("event") == "repair_attempt"
+    ] == [1]
     assert store.draft_count() == 2  # good draft + finalize snapshot; the bad one was never saved
 
 

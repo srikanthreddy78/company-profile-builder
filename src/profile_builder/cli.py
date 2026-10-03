@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -24,6 +25,7 @@ app = typer.Typer(
     help="Build a grounded company_brain.json from a company website (Deep Agents + LangGraph + OpenAI + Firecrawl).",
     no_args_is_help=True,
     add_completion=False,
+    pretty_exceptions_show_locals=False,  # tracebacks must never print key material
 )
 console = Console()
 
@@ -70,6 +72,7 @@ def _main(
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Warnings and errors only")] = False,
 ) -> None:
     level = "DEBUG" if verbose else "WARNING" if quiet else "INFO"
+    os.umask(0o077)  # run state, logs and caches are private to the user by default
     configure_console(level, console)
 
 

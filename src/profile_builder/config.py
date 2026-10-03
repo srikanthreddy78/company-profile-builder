@@ -31,13 +31,21 @@ MODEL_CALLS_PER_QUESTION = 4
 PAGES_PER_SCRAPE_CALL = 3  # scrape_pages accepts several URLs per call
 
 # Retry/backoff (used by ToolRetry + ModelRetry middleware) ----------------------------
-RETRY_INITIAL_DELAY_S = 1.0
+RETRY_INITIAL_DELAY_S = 2.0
 RETRY_MAX_DELAY_S = 30.0
-RETRY_BACKOFF_FACTOR = 2.0
+RETRY_BACKOFF_FACTOR = 3.0  # 2s, 6s: Firecrawl's free tier rate-limits bursts of ~10 requests
+SCRAPE_INTER_REQUEST_DELAY_S = 1.5  # polite pacing between live fetches inside one tool call
 MODEL_REQUEST_TIMEOUT_S = 60
 
 # Discovery ----------------------------------------------------------------------------
+FIRECRAWL_API_URL = "https://api.firecrawl.dev"  # pinned: never taken from the environment
 DISCOVERY_MAP_LIMIT = 200
+MAX_RAW_CANDIDATES = 500  # cap on raw links considered before DNS checks
+MAX_DISCOVER_CALLS = 3
+MAX_URLS_PER_SCRAPE_CALL = 10
+SCRAPE_ATTEMPTS_PER_PAGE = 2  # cap on fetch attempts (incl. failures) = MAX_PAGES * this
+ROBOTS_MAX_BYTES = 512 * 1024
+ROBOTS_MAX_REDIRECTS = 5
 MAX_CANDIDATES_TO_MODEL = 40
 MAX_URL_LENGTH = 2048
 DEFAULT_EXCLUDE_URL_PATTERNS: tuple[str, ...] = (
@@ -90,6 +98,8 @@ CHUNK_OVERLAP_TOKENS = 60
 CHARS_PER_TOKEN = 4  # cheap estimate; exactness is not needed for chunk sizing
 SEARCH_K = 6
 MAX_EXCERPT_CHARS = 600
+MIN_EXCERPT_CHARS = 25  # shorter "quotes" cannot ground a claim
+MAX_EVIDENCE_EXCERPT_CHARS = 2 * MAX_EXCERPT_CHARS
 MAX_READ_CHARS = 4000
 PAGE_LEAD_CHARS = 300
 PAGE_HEADINGS_TO_MODEL = 10
@@ -197,16 +207,18 @@ class Settings(BaseSettings):
         return data
 
     def with_overrides(self, **overrides: Any) -> Settings:
-        """Return a copy with the given non-None overrides applied (CLI flags)."""
+        """Return a validated copy with the given non-None overrides applied (CLI flags)."""
         clean = {k: v for k, v in overrides.items() if v is not None}
-        return self.model_copy(update=clean)
+        if not clean:
+            return self
+        return type(self)(_env_file=None, **{**self.model_dump(), **clean})
 
     @classmethod
     def from_snapshot(cls, snapshot: dict[str, Any], **overrides: Any) -> Settings:
         """Rebuild settings for `resume`: secrets from the environment, limits from the run."""
         base = cls()
         fields = {k: snapshot[k] for k in cls.SNAPSHOT_FIELDS if k in snapshot}
-        merged = base.model_copy(update=fields)
+        merged = cls(_env_file=None, **{**base.model_dump(), **fields})
         return merged.with_overrides(**overrides)
 
     def has_openai(self) -> bool:

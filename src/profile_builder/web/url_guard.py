@@ -29,7 +29,7 @@ class URLGuardError(ValueError):
 def _default_resolver(host: str) -> list[str]:
     try:
         infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-    except socket.gaierror as exc:
+    except (socket.gaierror, UnicodeError, OSError, ValueError) as exc:
         raise URLGuardError(f"DNS resolution failed for {host!r}: {exc}") from exc
     return sorted({info[4][0] for info in infos})
 
@@ -60,11 +60,48 @@ def _is_public_ip(ip_str: str) -> bool:
     return True
 
 
+# Multi-tenant hosting suffixes where each subdomain belongs to a different owner.
+MULTI_TENANT_SUFFIXES = frozenset(
+    {
+        "github.io",
+        "gitlab.io",
+        "vercel.app",
+        "netlify.app",
+        "herokuapp.com",
+        "pages.dev",
+        "web.app",
+        "firebaseapp.com",
+        "azurewebsites.net",
+        "cloudfront.net",
+        "amazonaws.com",
+        "blogspot.com",
+        "wordpress.com",
+        "wixsite.com",
+        "squarespace.com",
+        "webflow.io",
+        "myshopify.com",
+        "readthedocs.io",
+        "notion.site",
+        "framer.website",
+        "fly.dev",
+        "onrender.com",
+    }
+)
+
+
 def registrable_domain(host: str) -> str:
-    """Approximate eTLD+1 without a public-suffix list: handles common two-part TLDs."""
-    parts = host.lower().strip(".").split(".")
+    """Approximate eTLD+1 without a public-suffix list: common two-part TLDs and well-known
+    multi-tenant hosts are handled; IP literals are compared exactly."""
+    host = (host or "").lower().strip(".")
+    try:
+        return str(ipaddress.ip_address(host.strip("[]")))
+    except ValueError:
+        pass
+    parts = host.split(".")
     if len(parts) <= 2:
-        return ".".join(parts)
+        return host
+    if ".".join(parts[-2:]) in MULTI_TENANT_SUFFIXES:
+        return ".".join(parts[-3:])
     second_level = {"co", "com", "org", "net", "gov", "edu", "ac"}
     if parts[-2] in second_level and len(parts[-1]) == 2:
         return ".".join(parts[-3:])
@@ -73,10 +110,13 @@ def registrable_domain(host: str) -> str:
 
 def normalize_url(url: str) -> str:
     """Lowercase scheme/host, drop fragment, default ports, tracking params; sort query."""
-    parts = urlsplit(url.strip())
+    try:
+        parts = urlsplit((url or "").strip())
+        port = parts.port
+    except ValueError as exc:
+        raise URLGuardError(f"unparseable URL: {exc}") from exc
     scheme = parts.scheme.lower()
     host = (parts.hostname or "").lower().rstrip(".")
-    port = parts.port
     netloc = host
     if port and port != DEFAULT_PORTS.get(scheme):
         netloc = f"{host}:{port}"
@@ -94,6 +134,15 @@ def normalize_url(url: str) -> str:
 
 def validate_url(url: str, *, resolver: Resolver | None = None, check_dns: bool = True) -> str:
     """Validate and normalize a URL. Raises URLGuardError if it must not be fetched."""
+    try:
+        return _validate_url(url, resolver=resolver, check_dns=check_dns)
+    except URLGuardError:
+        raise
+    except (ValueError, UnicodeError) as exc:  # hostile input must never crash the caller
+        raise URLGuardError(f"invalid URL: {exc}") from exc
+
+
+def _validate_url(url: str, *, resolver: Resolver | None, check_dns: bool) -> str:
     if not url or not isinstance(url, str):
         raise URLGuardError("empty URL")
     if len(url) > MAX_URL_LENGTH:
@@ -129,8 +178,9 @@ def validate_url(url: str, *, resolver: Resolver | None = None, check_dns: bool 
     try:
         literal_ip = str(ipaddress.ip_address(host))
     except ValueError:
-        if re.fullmatch(r"[0-9a-fx.]+", host) and not re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", host):
-            # Decimal/hex/octal-looking host like 2130706433 or 0x7f000001 or 0177.0.0.1
+        # Decimal/hex/octal IP notations (2130706433, 0x7f000001, 0177.0.0.1, 127.1): every
+        # label looks like a number. Real hostnames such as "bad.be" are unaffected.
+        if all(re.fullmatch(r"0x[0-9a-f]+|0[0-7]*|[1-9][0-9]*", lab) for lab in host.split(".")):
             raise URLGuardError(f"numeric host {host!r} is not allowed") from None
     if literal_ip is not None:
         if not _is_public_ip(literal_ip):
@@ -151,6 +201,11 @@ def validate_url(url: str, *, resolver: Resolver | None = None, check_dns: bool 
 
 
 def same_site(url: str, start_url: str) -> bool:
-    a = urlsplit(url).hostname or ""
-    b = urlsplit(start_url).hostname or ""
-    return registrable_domain(a) == registrable_domain(b)
+    """Same registrable domain, and no https → http downgrade relative to the start URL."""
+    try:
+        u, b = urlsplit(url), urlsplit(start_url)
+    except ValueError:
+        return False
+    if b.scheme == "https" and u.scheme == "http":
+        return False
+    return registrable_domain(u.hostname or "") == registrable_domain(b.hostname or "")

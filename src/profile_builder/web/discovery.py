@@ -12,6 +12,7 @@ from profile_builder.config import (
     DEFAULT_EXCLUDE_URL_PATTERNS,
     DISCOVERY_MAP_LIMIT,
     MAX_CANDIDATES_TO_MODEL,
+    MAX_RAW_CANDIDATES,
     PAGE_SCORE_KEYWORDS,
 )
 from profile_builder.logging_setup import get_logger
@@ -52,6 +53,13 @@ class DiscoveryResult:
     notes: list[str] = field(default_factory=list)
 
 
+def _safe_normalize(url: str) -> str | None:
+    try:
+        return normalize_url(url)
+    except URLGuardError:
+        return None
+
+
 def score_url(url: str, title: str = "", description: str = "", start_url: str = "") -> int:
     parts = urlsplit(url)
     path = parts.path.lower()
@@ -78,14 +86,20 @@ def filter_and_score(
 ) -> tuple[list[ScoredCandidate], int]:
     seen: set[str] = set()
     out: list[ScoredCandidate] = []
-    dropped = 0
-    for cand in raw:
+    dropped = max(0, len(raw) - MAX_RAW_CANDIDATES)
+    for cand in raw[:MAX_RAW_CANDIDATES]:
+        # Cheap offline checks first: hostile links must not trigger DNS lookups or crashes.
         try:
-            url = validate_url(cand.url, resolver=cached_resolver, check_dns=check_dns)
+            url = normalize_url(cand.url)
         except URLGuardError:
             dropped += 1
             continue
         if not same_site(url, start_url) or is_excluded(url) or url in seen:
+            dropped += 1
+            continue
+        try:
+            url = validate_url(url, resolver=cached_resolver, check_dns=check_dns)
+        except URLGuardError:
             dropped += 1
             continue
         seen.add(url)
@@ -123,9 +137,11 @@ def discover(
             source = "map"
     except PermanentScrapeError as exc:
         notes.append(f"site map unavailable ({exc.code}); using homepage links")
-    known = {normalize_url(c.url) for c in raw if c.url}
+    known = {_safe_normalize(c.url) for c in raw if c.url} - {None}
     homepage_links = [
-        LinkCandidate(url=u) for u in (homepage.links or []) if u and normalize_url(u) not in known
+        LinkCandidate(url=u)
+        for u in (homepage.links or [])
+        if u and _safe_normalize(u) not in known | {None}
     ]
     if homepage_links:
         raw.extend(homepage_links)

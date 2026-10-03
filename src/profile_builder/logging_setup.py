@@ -44,12 +44,25 @@ EVENT_FIELDS = (
     "model",
 )
 
+_KNOWN_SECRETS: list[str] = []  # set by attach_run_sinks; used by redact_text()
+
 _SECRET_PATTERNS = [
-    re.compile(r"sk-[A-Za-z0-9_\-]{8,}"),
-    re.compile(r"fc-[A-Za-z0-9_\-]{8,}"),
+    re.compile(r"sk-[A-Za-z0-9_\-*]{8,}"),
+    re.compile(r"fc-[A-Za-z0-9_\-*]{8,}"),
+    re.compile(r"lsv2_[A-Za-z0-9_\-*]{8,}"),
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]{8,}"),
     re.compile(r"(?i)(api[_-]?key|authorization)\s*[:=]\s*['\"]?[A-Za-z0-9._\-]{8,}"),
 ]
+
+
+def redact_text(text: str) -> str:
+    """Mask known secrets and key-like tokens in arbitrary text (for values that bypass
+    logging, e.g. warnings stored in the run database or printed to the console)."""
+    for secret in _KNOWN_SECRETS:
+        text = text.replace(secret, "***REDACTED***")
+    for pat in _SECRET_PATTERNS:
+        text = pat.sub("***REDACTED***", text)
+    return text
 
 
 def set_run_context(run_id: str | None = None, stage: str | None = None) -> None:
@@ -80,9 +93,7 @@ class RedactSecretsFilter(logging.Filter):
     def redact(self, text: str) -> str:
         for s in self._secrets:
             text = text.replace(s, "***REDACTED***")
-        for pat in _SECRET_PATTERNS:
-            text = pat.sub("***REDACTED***", text)
-        return text
+        return redact_text(text)
 
     def filter(self, record: logging.LogRecord) -> bool:
         with contextlib.suppress(Exception):  # never break logging
@@ -99,6 +110,18 @@ class RedactSecretsFilter(logging.Filter):
         return True
 
 
+def _exc_text(record: logging.LogRecord) -> str:
+    exc_type, exc = record.exc_info[0], record.exc_info[1]  # type: ignore[index]
+    return redact_text(f"{getattr(exc_type, '__name__', 'Error')}: {exc}")
+
+
+_CONTROL_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _clean(text: str) -> str:
+    return _CONTROL_RE.sub("", text)
+
+
 class JsonLinesFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
@@ -108,14 +131,14 @@ class JsonLinesFormatter(logging.Formatter):
             "run_id": getattr(record, "run_id", "-"),
             "stage": getattr(record, "stage", "-"),
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": _clean(record.getMessage()),
         }
         for field in EVENT_FIELDS:
             val = getattr(record, field, None)
             if val is not None:
                 payload[field] = val
         if record.exc_info and record.exc_info[1] is not None:
-            payload["exception"] = f"{record.exc_info[0].__name__}: {record.exc_info[1]}"
+            payload["exception"] = _exc_text(record)
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
@@ -124,7 +147,7 @@ class TextFormatter(logging.Formatter):
         base = (
             f"{self.formatTime(record, '%Y-%m-%d %H:%M:%S')} {record.levelname:<7} "
             f"[{getattr(record, 'run_id', '-')}:{getattr(record, 'stage', '-')}] "
-            f"{record.getMessage()}"
+            f"{_clean(record.getMessage()).replace(chr(10), ' | ')}"
         )
         extras = []
         for field in EVENT_FIELDS:
@@ -134,7 +157,7 @@ class TextFormatter(logging.Formatter):
         if extras:
             base += "  (" + " ".join(extras) + ")"
         if record.exc_info and record.exc_info[1] is not None:
-            base += f"\n  {record.exc_info[0].__name__}: {record.exc_info[1]}"
+            base += f"\n  {_exc_text(record)}"
         return base
 
 
@@ -171,6 +194,10 @@ def attach_run_sinks(run_dir: Path, secrets: Iterable[str] = ()) -> None:
         if getattr(h, "_pb_run_dir", None):
             root.removeHandler(h)
             h.close()
+    for name in (EVENTS_FILENAME, RUN_LOG_FILENAME):  # create private before any handler opens
+        path = run_dir / name
+        if not path.exists():
+            path.touch(mode=0o600)
     events = logging.FileHandler(run_dir / EVENTS_FILENAME, encoding="utf-8")
     events.setLevel(logging.DEBUG)
     events.setFormatter(JsonLinesFormatter())
@@ -181,7 +208,10 @@ def attach_run_sinks(run_dir: Path, secrets: Iterable[str] = ()) -> None:
     text._pb_run_dir = str(run_dir)  # type: ignore[attr-defined]
     root.addHandler(events)
     root.addHandler(text)
+    _KNOWN_SECRETS[:] = [s for s in secrets if s and len(s) >= 8]
     _ensure_filters(root, secrets)
+    for noisy in ("openai", "httpx", "httpcore", "langchain", "langgraph"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     for path in (run_dir / EVENTS_FILENAME, run_dir / RUN_LOG_FILENAME):
         try:
             path.chmod(0o600)

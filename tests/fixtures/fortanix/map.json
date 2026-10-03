@@ -1,0 +1,202 @@
+[
+  {
+    "url": "https://www.fortanix.com/",
+    "title": "Homepage",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/platform",
+    "title": "Unified Data Security Platform | Fortanix Platform",
+    "description": "Fortanix Platform consolidates all data security services for fast onboarding & service consumption, secure IAM, audit trails, unified management & compliance"
+  },
+  {
+    "url": "https://www.fortanix.com/company/about",
+    "title": "About",
+    "description": "Data-first multi-cloud security company and a pioneer in Confidential Computing offering encryption services to large enterprises & Fortune 50 companies."
+  },
+  {
+    "url": "https://www.fortanix.com/customers/beekeeperai-case-study",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/customers/goldman-sachs-case-study",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/solutions/industry/data-security-for-healthcare",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/solutions/industry/data-security-for-banking-and-financial-services",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/solutions/industry/data-security-for-fintech",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/solutions/industry/government-data-security",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/blog/100-customers-lead-the-way-expanding-confidential-computing-across-platforms-and-clouds",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/solutions/use-case/regulatory-compliance",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/solutions/use-case/post-quantum-cryptography",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/solutions/use-case/legacy-to-cloud-infrastructure-migration",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/solutions/use-case/secure-data-driven-innovation",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/platform/data-security-manager",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/solutions/use-case/post-quantum-readiness",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/blog/5-awesome-features-of-fortanix-hsm-solution-that-organizations-love",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/solutions/industry/secure-manufacturing",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/customers",
+    "title": "Customers",
+    "description": "Learn how Fortanix is helping organizations across the world secure their most sensitive data."
+  },
+  {
+    "url": "https://www.fortanix.com/platform/confidential-ai",
+    "title": "Confidential AI",
+    "description": "Fortanix\u202fConfidential AI (C-AI) is a service for developing and deploying AI models on sensitive data using confidential computing."
+  },
+  {
+    "url": "https://www.fortanix.com/blog/announcing-fortanix-enclave-development-platform-integration-with-fortanix-enclave-manager",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/blog/composite-attestation-how-it-works-why-you-need-it",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/blog/how-a-vintage-american-apparel-brand-achieved-product-innovation-with-data-security-strategy",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/platform/confidential-computing",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/platform/confidential-computing-manager",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/platform/armet-ai",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/platform/key-insight",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/solutions",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/blog/a-case-study-on-api-security",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/blog/enterprise-cybersecurity-solutions-where-are-the-gaps-in-the-age-of-ai",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/resources/case-study/nec-partners-with-fortanix-for-confidential-computing",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/platform/runtime-encryption/enclave-development-platform",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/jp",
+    "title": "Securing Data in an AI world",
+    "description": "Future-Proof Your Data Security to protect your organization against growing privacy & security threats in the age of AI & post-quantum computing."
+  },
+  {
+    "url": "https://www.fortanix.com/faq/ai-security/ai-factory",
+    "title": "AI Factory",
+    "description": "Learn how AI Factory secures AI systems with trusted execution, data governance & protected pipelines to manage risks & enhance enterprise AI security."
+  },
+  {
+    "url": "https://www.fortanix.com/blog/7-reasons-why-data-tokenization-is-the-pillar-for-enterprise-data-security",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/blog/announcing-fortanix-enclave-development-platform",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/faq",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/company/awards",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/company/pr",
+    "title": "",
+    "description": ""
+  },
+  {
+    "url": "https://www.fortanix.com/company/mediakit",
+    "title": "",
+    "description": ""
+  }
+]

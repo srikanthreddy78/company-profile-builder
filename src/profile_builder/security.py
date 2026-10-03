@@ -30,7 +30,9 @@ INJECTION_PATTERNS = [
         r"as an ai (language )?model",
         r"do not (tell|reveal|mention) (the )?user",
         r"call the (tool|function) ",
-        r"<\s*/?\s*(system|assistant|tool)\s*>",
+        r"<\s*/?\s*(system|assistant|tool|user|developer)[-_ ]?(reminder|prompt|message)?\s*>",
+        r"(developer|system) (message|instructions?)",
+        r"(begin|end) (of )?(untrusted|trusted) (website )?content",
     )
 ]
 
@@ -43,7 +45,7 @@ class SecurityError(ValueError):
 
 
 def validate_run_id(run_id: str) -> str:
-    if not _RUN_ID_RE.match(run_id or ""):
+    if not _RUN_ID_RE.fullmatch(run_id or ""):
         raise SecurityError(f"invalid run id {run_id!r}")
     return run_id
 

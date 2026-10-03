@@ -418,6 +418,22 @@ class RunStore:
         )
         return cur.rowcount
 
+    def supersede_evidence_tree(self, field_path: str) -> dict[str, int]:
+        """Mark evidence for `field_path` and its descendants as stale (value changed).
+        Returns counts per kind so callers can warn about replaced website claims."""
+        rows = self._conn.execute(
+            "SELECT kind, COUNT(*) AS n FROM evidence WHERE superseded=0 AND"
+            " (field_path=? OR field_path LIKE ? OR field_path LIKE ?) GROUP BY kind",
+            (field_path, field_path + "[%", field_path + ".%"),
+        ).fetchall()
+        counts = {r["kind"]: int(r["n"]) for r in rows}
+        self._conn.execute(
+            "UPDATE evidence SET superseded=1 WHERE superseded=0 AND"
+            " (field_path=? OR field_path LIKE ? OR field_path LIKE ?)",
+            (field_path, field_path + "[%", field_path + ".%"),
+        )
+        return counts
+
     def list_evidence(self, include_superseded: bool = True) -> list[dict[str, Any]]:
         sql = "SELECT * FROM evidence" + ("" if include_superseded else " WHERE superseded=0")
         rows = self._conn.execute(sql + " ORDER BY field_path, id").fetchall()

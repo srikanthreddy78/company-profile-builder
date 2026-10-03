@@ -36,9 +36,15 @@ from profile_builder.config import (
     RUN_ID_PREFIX,
     Settings,
 )
-from profile_builder.logging_setup import attach_run_sinks, event, get_logger, set_run_context
+from profile_builder.logging_setup import (
+    attach_run_sinks,
+    event,
+    get_logger,
+    redact_text,
+    set_run_context,
+)
 from profile_builder.retrieval.index import Embeddings, HashEmbeddings, HybridIndex
-from profile_builder.security import safe_child, sanitize_answer, validate_run_id
+from profile_builder.security import safe_child, safe_text, sanitize_answer, validate_run_id
 from profile_builder.state.run_store import RunStore
 from profile_builder.web.robots import RobotsChecker
 from profile_builder.web.scraper import (
@@ -140,6 +146,7 @@ class Runner:
         run_id = new_run_id()
         run_dir = safe_child(self.settings.runs_dir, run_id)
         run_dir.mkdir(parents=True, exist_ok=False)
+        run_dir.chmod(0o700)
         self._attach_logging(run_id, run_dir)
         store = RunStore(run_dir)
         store.create_run(run_id, start_url, product, self.settings.snapshot())
@@ -228,6 +235,8 @@ class Runner:
         """Re-export from the latest saved draft without running the agent."""
         validate_run_id(run_id)
         run_dir = safe_child(self.settings.runs_dir, run_id)
+        if not (run_dir / "run.sqlite").exists():
+            raise FileNotFoundError(f"run {run_id} not found under {self.settings.runs_dir}")
         store = RunStore(run_dir)
         run = store.get_run()
         self._attach_logging(run_id, run_dir)
@@ -365,7 +374,9 @@ class Runner:
         except Exception as exc:  # unexpected: keep the run resumable, report clearly
             log.error("run interrupted by error: %s: %s", type(exc).__name__, exc, exc_info=True)
             ctx.store.set_status("interrupted")
-            ctx.store.add_warning("RUN_INTERRUPTED", f"{type(exc).__name__}: {str(exc)[:300]}")
+            ctx.store.add_warning(
+                "RUN_INTERRUPTED", redact_text(f"{type(exc).__name__}: {str(exc)[:300]}")
+            )
             hint = (
                 f"The run stopped on an error and can be resumed:\n  {self._resume_cmd(ctx.run_id)}"
             )
@@ -381,7 +392,7 @@ class Runner:
             return RunOutcome(
                 ctx.run_id,
                 "interrupted",
-                message=f"{type(exc).__name__}: {exc}",
+                message=redact_text(f"{type(exc).__name__}: {exc}"),
                 resume_hint=self._resume_cmd(ctx.run_id),
             )
 
@@ -434,12 +445,13 @@ class Runner:
         return RunOutcome(ctx.run_id, status, output_path)
 
     def _failed(self, ctx: ToolContext, message: str) -> RunOutcome:
+        message = redact_text(message)
         ctx.store.set_status("failed")
         ctx.store.add_warning("RUN_FAILED", message[:300])
         event(log, "run_finished", f"run failed: {message}", level=logging.ERROR, status="failed")
         latest = ctx.store.latest_draft()
         render_summary(self.console, ctx.store, latest[1] if latest else None, "failed", None)
-        self.console.print(f"[bold red]Error:[/bold red] {message}")
+        self.console.print(f"[bold red]Error:[/bold red] {safe_text(message, 500)}")
         if latest:
             self.console.print(
                 f"[dim]A valid earlier draft exists; export it with: python -m profile_builder export --run-id {ctx.run_id}[/dim]"

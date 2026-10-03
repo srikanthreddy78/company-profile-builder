@@ -5,9 +5,16 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from deepagents import create_deep_agent
+from deepagents import (
+    GeneralPurposeSubagentProfile,
+    HarnessProfile,
+    create_deep_agent,
+    register_harness_profile,
+)
+from deepagents._models import get_model_provider
 from deepagents.backends import StateBackend
 from deepagents.middleware.filesystem import FilesystemMiddleware
+from deepagents.profiles.harness import harness_profiles as _hp
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.sqlite import SqliteSaver
 
@@ -61,8 +68,32 @@ def build_checkpointer(run_dir: Path) -> SqliteSaver:
     return saver
 
 
+def disable_default_subagent(model: BaseChatModel) -> None:
+    """Deep Agents auto-adds a `task` tool + general-purpose subagent that would run our tools
+    *without* our middleware (limits, budget, serial calls, untrusted-content framing). The
+    harness profile is resolved per model provider, so register an override for this model's
+    provider that disables it (merging with any existing provider profile)."""
+    import dataclasses
+
+    provider = get_model_provider(model) or "unknown"
+    existing = _hp._get_harness_profile(provider) or HarnessProfile()
+    register_harness_profile(
+        provider,
+        dataclasses.replace(
+            existing, general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False)
+        ),
+    )
+
+
+def exposed_tool_names(agent) -> set[str]:
+    node = agent.nodes.get("tools")
+    bound = getattr(node, "bound", None) or node
+    return set(getattr(bound, "tools_by_name", {}).keys())
+
+
 def build_agent(ctx: ToolContext, model: BaseChatModel, checkpointer: SqliteSaver):
     settings = ctx.settings
+    disable_default_subagent(model)
     backend = StateBackend()
     middleware = [
         FilesystemMiddleware(
@@ -70,7 +101,7 @@ def build_agent(ctx: ToolContext, model: BaseChatModel, checkpointer: SqliteSave
         ),  # replaces the default by name
         *build_middleware(settings, ctx.store),
     ]
-    return create_deep_agent(
+    agent = create_deep_agent(
         model=model,
         tools=make_tools(ctx),
         system_prompt=render_system_prompt(
@@ -83,3 +114,7 @@ def build_agent(ctx: ToolContext, model: BaseChatModel, checkpointer: SqliteSave
         checkpointer=checkpointer,
         name="company-profile-builder",
     )
+    exposed = exposed_tool_names(agent)
+    if "task" in exposed or "execute" in exposed:
+        raise RuntimeError(f"unexpected agent tools exposed: {sorted(exposed)}")
+    return agent
