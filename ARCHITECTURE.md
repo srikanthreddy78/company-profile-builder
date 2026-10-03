@@ -28,7 +28,7 @@ CLI (typer + rich)
 | Untrusted content | `UntrustedContentMiddleware` frames web tool output | injection heuristics → `INJECTION_SUSPECTED` | — |
 | Logging | telemetry logs every model/tool attempt (duration, tokens, cost, status) | stage changes, page fetches, limits, questions, drafts | run start/finish, resume, failures |
 | Validation + repair | — | Pydantic `CompanyBrain`; one consecutive repair attempt (`MAX_REPAIR_ATTEMPTS`, counter resets after a valid save), then `FatalProfileError` | turns the fatal error into status `failed`, keeps state, never writes a profile |
-| Grounding | — | evidence must quote a fetched page verbatim *and* mention the value it supports; interview evidence must come from a question that covered the field; field paths allow-listed; stale evidence superseded when a value changes; conflicts tracked and omitted if unresolved | `inspect` shows evidence per field |
+| Grounding | — | evidence must quote a fetched page verbatim *and* mention the value it supports; interview evidence must come from a question that covered the field; user answers take precedence over later drafts and cannot be overridden by website evidence; field paths allow-listed; stale evidence superseded when a value changes; `finalize_profile` pushes back once listing ungrounded fields, then export **omits** any populated field without accepted evidence and any unresolved conflict (recorded as `UNGROUNDED_OMITTED` / `CONFLICT_UNRESOLVED_OMITTED`), re-indexing list evidence so re-export is idempotent | `inspect` shows evidence per field |
 | Interview | — | `ask_user` calls `langgraph.types.interrupt`, commits the answer idempotently | shows the question, reads input, resumes with `Command(resume={interrupt_id: answer})` |
 
 Middleware order (first = outermost): `SerialToolCalls → [BudgetCap] → ModelCallLimit →
@@ -94,7 +94,10 @@ all tool calls in one model message form one step. Therefore:
   `Command(resume=...)` or continues with `invoke(None, config)`. Otherwise Deep Agents'
   `PatchToolCallsMiddleware` would mark the pending `ask_user` as cancelled.
 - Resume rebuilds the agent from scratch (new process), reads `get_state(config)`: a pending
-  interrupt → show the question and resume; `next` non-empty → continue; otherwise finish.
+  interrupt whose answer is already committed in the RunStore (crash between commit and
+  checkpoint) → replay with the durable answer without asking; otherwise show the question and
+  resume; `next` non-empty → continue; a `partial` run with a raised budget/question cap →
+  continue with a nudge; otherwise finish.
 
 Settings are snapshotted into the run at `start`; `resume` reuses them unless
 `--max-questions`/`--budget-usd` are passed explicitly (recorded as a warning).
@@ -104,7 +107,8 @@ Settings are snapshotted into the run at `start`; `resume` reuses them unless
 `running → paused` (user typed `exit`) `→ running → complete | partial | failed`, plus
 `interrupted` (unexpected error; resumable).
 
-- **complete** — `finalize_profile` ran; the profile is schema-valid. Remaining gaps and
+- **complete** — `finalize_profile` ran; the profile is schema-valid and every exported claim
+  has accepted evidence (ungrounded values were omitted and reported). Remaining gaps and
   skipped questions are reported, not hidden. Reaching the page or question cap is normal.
 - **partial** — the run was cut short (model-call cap, budget, or the agent stopped twice
   without finalizing); the last valid draft is exported and labeled partial in `evidence.json`.
@@ -143,6 +147,13 @@ Nine live runs against fortanix.com shaped the final behavior:
 - The model invented an extra key once and failed the run → unknown keys are stripped with a
   warning before validation.
 - Firecrawl's free tier rate-limits bursts → longer backoff and 1.5 s pacing between fetches.
+- A second external review found grounding/recovery gaps → export now omits unsupported
+  claims, user answers are protected from later drafts, conflict omission is idempotent with
+  evidence re-indexing, a crash between answer-commit and checkpoint no longer re-asks,
+  partial runs resume after raising limits, 5xx failures are refetched later, the page budget
+  counts unique scrapes (duplicates included) and discovery reuses the cached homepage,
+  transient error text is redacted before storage, interrupted runs exit non-zero, short
+  factual lines survive chunking, and model-call telemetry carries the real stage.
 
 ## Time spent
 

@@ -92,6 +92,12 @@ QUESTION_KINDS = ("product_selection", "gap", "conflict", "brand")
 _NUMBERED_ITEM_RE = re.compile(r"(?m)^\s*(?:\(?\d{1,2}[.)]|[a-d][.)]|[-•*])\s+\S")
 MAX_QUESTION_MARKS = 2  # a question plus one clarifying sub-question is fine; a list is not
 FINALIZE_GUARD_SECTIONS = frozenset({"product", "customer", "content_evidence"})
+
+
+def is_transient_code(code: str | None) -> bool:
+    return bool(code) and (code in TRANSIENT_CODES or code.startswith("HTTP_5"))
+
+
 OBSERVATION_PATHS = frozenset({"brand.voice_and_tone", "brand.writing_style"})
 STEM_CHARS = 5
 MIN_CONTENT_TOKEN_CHARS = 4
@@ -133,7 +139,8 @@ class ToolContext:
             event(log, "stage_changed", f"stage → {stage}", kind=stage)
 
     def page_budget_remaining(self) -> int:
-        return max(0, self.settings.max_pages - len(self.store.fetched_urls()))
+        """Unique pages scraped (incl. duplicates/empties/permanent failures) vs. the cap."""
+        return max(0, self.settings.max_pages - self.store.unique_pages_scraped())
 
     def page_text(self, url: str) -> str | None:
         url = normalize_url(url)
@@ -373,9 +380,16 @@ def make_tools(ctx: ToolContext) -> list[Any]:
             return _json(
                 {"ok": False, "error": "robots.txt disallows the homepage; no pages can be fetched"}
             )
+        cached_home = ctx.cached_page(url)
         result = discover(
-            url, ctx.scraper, timeout_ms=settings.scrape_timeout_ms, check_dns=ctx.check_dns
+            url,
+            ctx.scraper,
+            timeout_ms=settings.scrape_timeout_ms,
+            check_dns=ctx.check_dns,
+            homepage=cached_home,
         )
+        if cached_home is None and result.homepage is not None:
+            store.increment_counter("scrape_attempts")
         for note in result.notes:
             ctx.warn("DISCOVERY_NOTE", note)
         if result.homepage is not None and ctx.page_budget_remaining() > 0:
@@ -463,7 +477,7 @@ def make_tools(ctx: ToolContext) -> list[Any]:
             if (
                 existing
                 and existing.status == "failed"
-                and existing.error_code not in TRANSIENT_CODES
+                and not is_transient_code(existing.error_code)
             ):
                 results.append(
                     {"url": url, "status": "failed", "error": f"already failed: {existing.error}"}
@@ -537,7 +551,7 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                             0,
                             None,
                             exc.code,
-                            str(exc),
+                            redact_text(str(exc)),
                             True,
                             time.time(),
                         )
@@ -960,19 +974,25 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         # Merge with the previous draft: a later draft may never erase a field that an earlier
         # one filled (the model sometimes re-sends a thinner profile after the interview).
         kept_from_previous: list[str] = []
+        protected_by_user: list[str] = []
         previous = store.latest_draft()
         if previous is not None:
             _, prev = previous
+            user_bases = store.interview_bases()
             for base in (*STRING_PATHS, *STRING_LIST_PATHS, FEATURE_LIST_PATH):
                 new_val, old_val = get_by_path(clean, base), get_by_path(prev, base)
-                if new_val in ("", [], None) and old_val not in ("", [], None):
+                if base in user_bases and new_val != old_val:
+                    # An explicit user answer always wins over a later website-based draft.
+                    set_by_path(clean, base, copy.deepcopy(old_val))
+                    protected_by_user.append(base)
+                elif new_val in ("", [], None) and old_val not in ("", [], None):
                     set_by_path(clean, base, copy.deepcopy(old_val))
                     kept_from_previous.append(base)
             clean = CompanyBrain.model_validate(clean).model_dump(mode="json")
         restated = {
             base
             for base in (*STRING_PATHS, *STRING_LIST_PATHS, FEATURE_LIST_PATH)
-            if base not in kept_from_previous
+            if base not in kept_from_previous and base not in protected_by_user
         }
         accepted, rejected = _verify_website_evidence(clean, evidence)
         store.replace_website_evidence(accepted, only_fields=restated)
@@ -995,6 +1015,7 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                 "evidence_accepted": len(accepted),
                 "evidence_rejected": rejected,
                 "kept_from_previous_draft": kept_from_previous,
+                "protected_by_user_answers": protected_by_user,
                 "ignored_unknown_keys": unknown,
                 **payload,
                 "next": "ask focused questions for the top gaps/conflicts, or finalize_profile if none are worth asking",
@@ -1052,7 +1073,15 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                     )
                     continue
             elif kind == "website":
-                pass  # verified after the value is set (it must be non-empty)
+                if path.split("[")[0] in store.interview_bases():
+                    rejected.append(
+                        {
+                            "field_path": path,
+                            "reason": "this field was set by a user answer; website evidence "
+                            "cannot override it (ask the user instead)",
+                        }
+                    )
+                    continue
             else:
                 rejected.append(
                     {"field_path": path, "reason": "evidence.kind must be 'interview' or 'website'"}
@@ -1194,10 +1223,28 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         latest = store.latest_draft()
         if latest is not None and store.get_counter("finalize_refusals") < MAX_FINALIZE_REFUSALS:
             advice = _thin_draft_advice(latest[1], strict=True)
-            if advice:
+            ungrounded = ungrounded_paths(store, latest[1])
+            if advice or ungrounded:
                 store.increment_counter("finalize_refusals")
                 return _json(
-                    {"ok": False, "error": "profile not ready to export", "advice": advice}
+                    {
+                        "ok": False,
+                        "error": "profile not ready to export",
+                        **({"advice": advice} if advice else {}),
+                        **(
+                            {
+                                "ungrounded": ungrounded[:20],
+                                "ungrounded_hint": (
+                                    "these populated fields have no accepted evidence and will be "
+                                    "OMITTED from the export unless you cite a verbatim page excerpt "
+                                    "(apply_profile_updates with kind=website) or an answered question. "
+                                    "Call finalize_profile again when done."
+                                ),
+                            }
+                            if ungrounded
+                            else {}
+                        ),
+                    }
                 )
         ctx.set_stage("finalize")
         result = finalize(ctx)
@@ -1222,8 +1269,43 @@ def make_tools(ctx: ToolContext) -> list[Any]:
 # --------------------------------------------------------------------------------------
 
 # Reaching the page/question caps is normal bounded behavior; only being cut off before the
-# agent could finish (model-call cap, budget, forced stop) makes a profile "partial".
-PARTIAL_WARNING_CODES = ("LIMIT_MODEL_CALLS_REACHED", "BUDGET_EXCEEDED")
+# agent could finish (model-call cap, budget, forced stop) makes a profile "partial". The
+# runner passes forced_partial for the model-call cap; the budget is re-checked live so a
+# resumed run with a raised budget can complete.
+
+
+def ungrounded_paths(store: RunStore, profile: dict[str, Any]) -> list[str]:
+    return list(grounding_report(profile, evidence_paths(store))["ungrounded"])
+
+
+def _omit_path(store: RunStore, data: dict[str, Any], path: str) -> None:
+    """Remove the value at `path` from the profile dict and keep evidence/conflict paths
+    consistent (list items are deleted and later indexes renumbered)."""
+    base, index, sub = parse_field_path(path)
+    current = get_by_path(data, path)
+    if current in ("", [], None):
+        return
+    if index is not None and (sub is None or sub == "name"):
+        lst = get_by_path(data, base)
+        if isinstance(lst, list) and index < len(lst):
+            del lst[index]
+            store.shift_list_paths(base, index)
+    elif sub is not None:
+        set_by_path(data, path, "")
+    elif isinstance(current, list):
+        set_by_path(data, path, [])
+    else:
+        set_by_path(data, path, "")
+
+
+def _omit_many(store: RunStore, data: dict[str, Any], paths: list[str]) -> None:
+    # Delete list items from the highest index down so earlier indexes stay valid.
+    def sort_key(p: str) -> tuple[str, int]:
+        base, index, _sub = parse_field_path(p)
+        return (base, -(index if index is not None else -1))
+
+    for path in sorted(set(paths), key=sort_key):
+        _omit_path(store, data, path)
 
 
 def finalize(ctx: ToolContext, *, forced_partial: bool = False) -> dict[str, Any]:
@@ -1233,26 +1315,31 @@ def finalize(ctx: ToolContext, *, forced_partial: bool = False) -> dict[str, Any
         raise FatalProfileError("no valid draft exists; nothing to export")
     _, profile = latest
     data = copy.deepcopy(profile)
-    for c in store.list_conflicts("open"):
-        path = c["field_path"]
-        base, index, sub = parse_field_path(path)
-        current = get_by_path(data, path)
-        if current in ("", [], None):
+
+    # 1. Unresolved conflicts: omit the disputed value once and mark the conflict so a later
+    #    re-export does not delete a different item that moved into the same index.
+    disputed = [c["field_path"] for c in store.list_conflicts("open")]
+    for path in disputed:
+        if get_by_path(data, path) in ("", [], None):
+            store.set_conflict_status(path, "omitted", "value was already empty at export")
             continue
-        if sub is not None:
-            set_by_path(data, path, "")
-        elif index is not None:
-            lst = get_by_path(data, base)
-            if isinstance(lst, list) and index < len(lst):
-                del lst[index]
-        elif isinstance(current, list):
-            set_by_path(data, path, [])
-        else:
-            set_by_path(data, path, "")
         ctx.warn(
             "CONFLICT_UNRESOLVED_OMITTED",
             f"{path}: conflicting evidence was not resolved; value omitted",
         )
+        store.set_conflict_status(path, "omitted", "omitted from the export (unresolved)")
+    _omit_many(store, data, disputed)
+
+    # 2. Grounding: a populated field without accepted evidence is not exported.
+    ungrounded = ungrounded_paths(store, data)
+    if ungrounded:
+        ctx.warn(
+            "UNGROUNDED_OMITTED",
+            f"{len(ungrounded)} populated field(s) had no accepted evidence and were omitted: "
+            + ", ".join(ungrounded[:12]),
+        )
+        _omit_many(store, data, ungrounded)
+
     feats = data.get("product", {}).get("features_and_capabilities", [])
     data["product"]["features_and_capabilities"] = [
         f
@@ -1266,14 +1353,10 @@ def finalize(ctx: ToolContext, *, forced_partial: bool = False) -> dict[str, Any
             "final profile failed validation: " + "; ".join(_format_validation_error(exc))
         ) from exc
     clean = brain.model_dump(mode="json")
+    budget = ctx.settings.budget_usd
+    over_budget = budget is not None and store.total_cost() >= budget
     status = (
-        "partial"
-        if (
-            forced_partial
-            or any(store.has_warning(c) for c in PARTIAL_WARNING_CODES)
-            or not store.fetched_urls()
-        )
-        else "complete"
+        "partial" if (forced_partial or over_budget or not store.fetched_urls()) else "complete"
     )
     output_path = write_outputs(ctx.run_dir, store, clean, status)
     store.save_draft(clean, "finalize")

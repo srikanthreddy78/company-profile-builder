@@ -7,7 +7,6 @@ through a secret-redaction filter before reaching any sink.
 from __future__ import annotations
 
 import contextlib
-import contextvars
 import json
 import logging
 import re
@@ -23,8 +22,9 @@ from profile_builder.config import EVENTS_FILENAME, RUN_LOG_FILENAME
 
 LOGGER_NAME = "profile_builder"
 
-_run_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("run_id", default="-")
-_stage_var: contextvars.ContextVar[str] = contextvars.ContextVar("stage", default="init")
+# Process-wide (not contextvars): tools execute in the tool node's worker threads, and a
+# stage set there must be visible to model-call telemetry logged from the main thread.
+_CONTEXT: dict[str, str] = {"run_id": "-", "stage": "init"}
 
 EVENT_FIELDS = (
     "event",
@@ -67,19 +67,19 @@ def redact_text(text: str) -> str:
 
 def set_run_context(run_id: str | None = None, stage: str | None = None) -> None:
     if run_id is not None:
-        _run_id_var.set(run_id)
+        _CONTEXT["run_id"] = run_id
     if stage is not None:
-        _stage_var.set(stage)
+        _CONTEXT["stage"] = stage
 
 
 def current_stage() -> str:
-    return _stage_var.get()
+    return _CONTEXT["stage"]
 
 
 class ContextFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        record.run_id = _run_id_var.get()
-        record.stage = _stage_var.get()
+        record.run_id = _CONTEXT["run_id"]
+        record.stage = _CONTEXT["stage"]
         return True
 
 

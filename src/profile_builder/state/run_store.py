@@ -298,6 +298,57 @@ class RunStore:
         rows = self._conn.execute("SELECT url FROM pages WHERE status='fetched'").fetchall()
         return {r["url"] for r in rows}
 
+    def unique_pages_scraped(self) -> int:
+        """Distinct URLs for which a live scrape returned *something*: successful pages,
+        duplicates/empties, off-site redirects and permanent failures. Transient failures,
+        robots skips and guard rejections did not consume a scrape."""
+        row = self._conn.execute(
+            """SELECT COUNT(*) AS n FROM pages WHERE status='fetched'
+               OR error_code IN ('DUPLICATE_CONTENT','EMPTY_CONTENT','REDIRECT_REJECTED','REDIRECT_OFFSITE')
+               OR (status='failed' AND error_code NOT IN ('RATE_LIMITED','TIMEOUT','SERVER_ERROR','NETWORK','TRANSIENT','HTTP_429','HTTP_408')
+                   AND error_code NOT LIKE 'HTTP_5%')"""
+        ).fetchone()
+        return int(row["n"])
+
+    def shift_list_paths(self, base: str, removed_index: int) -> None:
+        """After deleting list item `removed_index` of `base`, drop evidence/conflict rows that
+        pointed at it and renumber rows pointing past it, so paths keep meaning."""
+        for table in ("evidence", "conflicts"):
+            rows = self._conn.execute(
+                f"SELECT rowid AS rid, field_path FROM {table} WHERE field_path LIKE ?",
+                (base + "[%",),
+            ).fetchall()
+            for r in rows:
+                rest = r["field_path"][len(base) + 1 :]
+                idx_str, _, tail = rest.partition("]")
+                if not idx_str.isdigit():
+                    continue
+                idx = int(idx_str)
+                if idx == removed_index:
+                    if table == "evidence":  # conflicts stay as a record of what was omitted
+                        self._conn.execute(
+                            f"DELETE FROM {table} WHERE rowid=?",
+                            (r["rid"],),
+                        )
+                elif idx > removed_index:
+                    self._conn.execute(
+                        f"UPDATE {table} SET field_path=? WHERE rowid=?",
+                        (f"{base}[{idx - 1}]{tail}", r["rid"]),
+                    )
+
+    def set_conflict_status(self, field_path: str, status: str, resolution: str) -> None:
+        self._conn.execute(
+            "UPDATE conflicts SET status=?, resolution=? WHERE field_path=?",
+            (status, resolution, field_path),
+        )
+
+    def interview_bases(self) -> set[str]:
+        """Base field paths that currently carry a (non-superseded) user answer."""
+        rows = self._conn.execute(
+            "SELECT DISTINCT field_path FROM evidence WHERE kind='interview' AND superseded=0"
+        ).fetchall()
+        return {r["field_path"].split("[")[0] for r in rows}
+
     def content_hash_exists(self, content_hash: str, other_than: str) -> str | None:
         row = self._conn.execute(
             "SELECT url FROM pages WHERE content_hash=? AND url<>? AND status='fetched' LIMIT 1",

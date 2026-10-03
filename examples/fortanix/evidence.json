@@ -1,6 +1,6 @@
 {
   "run_id": "pb-20261002-5bsvmi",
-  "generated_at": "2026-10-03T02:26:03Z",
+  "generated_at": "2026-10-03T02:42:14Z",
   "tool_version": "0.1.0",
   "status": "complete",
   "start_url": "https://www.fortanix.com/",
@@ -376,7 +376,7 @@
       "superseded": false
     },
     {
-      "field_path": "product.features_and_capabilities[4]",
+      "field_path": "product.features_and_capabilities[3]",
       "kind": "website",
       "source_url": "https://www.fortanix.com/customers/beekeeperai-case-study",
       "excerpt": "Fortanix makes it possible to enroll computing resources, in the cloud or on-premises, and deploy existing applications within a secure TEE in minutes.",
@@ -440,6 +440,11 @@
       "code": "EVIDENCE_REJECTED",
       "message": "customer.desired_outcomes: excerpt is not a verbatim quote from that page",
       "details": null
+    },
+    {
+      "code": "UNGROUNDED_OMITTED",
+      "message": "4 populated field(s) had no accepted evidence and were omitted: product.features_and_capabilities[3].name, product.features_and_capabilities[3].description, product.features_and_capabilities[3].how_it_works, product.features_and_capabilities[3].customer_benefit",
+      "details": null
     }
   ],
   "gaps": [
@@ -451,20 +456,15 @@
     }
   ],
   "grounding": {
-    "populated": 79,
+    "populated": 75,
     "grounded": 75,
-    "ungrounded": [
-      "product.features_and_capabilities[3].name",
-      "product.features_and_capabilities[3].description",
-      "product.features_and_capabilities[3].how_it_works",
-      "product.features_and_capabilities[3].customer_benefit"
-    ]
+    "ungrounded": []
   },
   "usage": {
-    "calls": 26,
-    "model_calls": 16,
-    "input_tokens": 179966,
-    "output_tokens": 4385,
-    "cost_usd": 0.18574407999999998
+    "calls": 27,
+    "model_calls": 17,
+    "input_tokens": 197097,
+    "output_tokens": 4503,
+    "cost_usd": 0.19405357999999998
   }
 }

@@ -14,6 +14,7 @@ from tests.conftest import (
     DRAFT_PROFILE,
     SITE,
     ScriptedChatModel,
+    finalize_steps,
     last_tool_result,
     make_runner,
     tool_call,
@@ -76,8 +77,7 @@ def two_question_steps():
         apply_first,
         tool_call("ask_user", Q2, "ask2"),
         apply_second,
-        tool_call("finalize_profile", {}),
-        AIMessage(content="done"),
+        *finalize_steps(),
     ]
 
 

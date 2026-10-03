@@ -2,7 +2,7 @@
 
 - Run: `pb-20261002-5bsvmi`  ·  Status: **complete**  ·  Output: `/Users/srikanth/projects/company-profile-builder/.runs/pb-20261002-5bsvmi/company_brain.json`
 - Website: https://www.fortanix.com/  ·  Product focus: Confidential Computing Platform
-- Model calls: 16  ·  Tokens in/out: 179966/4385  ·  Estimated cost: $0.1857
+- Model calls: 17  ·  Tokens in/out: 197097/4503  ·  Estimated cost: $0.1941
 
 ## Coverage
 
@@ -14,8 +14,7 @@
 | content_evidence | 4/4 |
 | brand | 3/4 |
 
-Grounding: 75/79 populated fields have verified evidence.
-Ungrounded fields: `product.features_and_capabilities[3].name`, `product.features_and_capabilities[3].description`, `product.features_and_capabilities[3].how_it_works`, `product.features_and_capabilities[3].customer_benefit`
+Grounding: 75/75 populated fields have verified evidence.
 
 ## Pages
 
@@ -47,3 +46,4 @@ Ungrounded fields: `product.features_and_capabilities[3].name`, `product.feature
 
 - `EVIDENCE_REJECTED` product.features_and_capabilities［3］: excerpt is not a verbatim quote from that page
 - `EVIDENCE_REJECTED` customer.desired_outcomes: excerpt is not a verbatim quote from that page
+- `UNGROUNDED_OMITTED` 4 populated field(s) had no accepted evidence and were omitted: product.features_and_capabilities［3］.name, product.features_and_capabilities［3］.description, product.features_and_capabilities［3］.how_it_works, product.features_and_capabilities［3］.customer_benefit

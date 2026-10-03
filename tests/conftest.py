@@ -386,7 +386,7 @@ DRAFT_EVIDENCE: list[dict[str, str]] = [
     {
         "field_path": "brand.preferred_terms",
         "source_url": f"{SITE}/",
-        "excerpt": "confidential computing",
+        "excerpt": "protect sensitive data in use with confidential computing",
     },
     # deliberately unverifiable → must be rejected
     {
@@ -402,6 +402,22 @@ CONFLICT_QUESTION = {
     "field_paths": ["customer.target_customer"],
     "kind": "conflict",
 }
+
+
+def finalize_steps() -> list[Step]:
+    """finalize_profile, then (like a real model) call it again if it pushed back once."""
+
+    def retry_if_refused(messages: list[BaseMessage]) -> AIMessage:
+        res = last_tool_result(messages)
+        if res.get("ok") is False:
+            return tool_call("finalize_profile", {}, "finalize_retry")
+        return AIMessage(content="Profile exported.")
+
+    return [
+        tool_call("finalize_profile", {}, "finalize_first"),
+        retry_if_refused,
+        AIMessage(content="Profile exported."),
+    ]
 
 
 def happy_path_steps(*, ask: bool = True, finalize: bool = True) -> list[Step]:
@@ -469,6 +485,7 @@ def happy_path_steps(*, ask: bool = True, finalize: bool = True) -> list[Step]:
 
         steps.append(apply_answer)
     if finalize:
-        steps.append(tool_call("finalize_profile", {}))
-    steps.append(AIMessage(content="Profile exported."))
+        steps.extend(finalize_steps())
+    else:
+        steps.append(AIMessage(content="Profile exported."))
     return steps

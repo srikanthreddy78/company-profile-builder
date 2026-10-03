@@ -102,12 +102,18 @@ derived caps (model calls, scrape calls) follow it automatically.
 
 Optional LangSmith tracing works through the standard `LANGSMITH_*` variables.
 
+### Exit codes
+
+`0` complete, partial or paused by the user · `1` failed (no profile written) · `3` stopped on an
+error and resumable (`resume --run-id …`).
+
 ### What happens at the limits
 
 - **Page / question cap reached** — normal; the run finishes as `complete` and the report
   lists what was not fetched or asked.
 - **Budget reached** — the agent stops before the next model call, the last valid draft is
   exported as `partial`, and the summary prints `resume --run-id … --budget-usd <higher>`.
+  Resuming with a higher budget (or `--max-questions`) continues the same run from its checkpoint.
 - **Model-call cap reached** — same as budget (`partial`).
 - **Invalid model output** — one repair attempt; if it fails again the run is `failed`, state
   is kept, and no profile is written.
@@ -124,7 +130,10 @@ pages are cached, chunked (heading-aware, nav/footer de-duplicated across pages)
 the agent gathers evidence through hybrid search rather than reading raw pages; drafts are
 validated with Pydantic and every evidence excerpt must be a verbatim quote of a fetched page;
 gaps and conflicts are prioritized in code and the agent asks one focused question at a time
-via a LangGraph interrupt; answers are committed to SQLite before the graph advances.
+via a LangGraph interrupt; answers are committed to SQLite before the graph advances and take
+precedence over anything the website says. At export, a populated field without accepted
+evidence (a verbatim page excerpt or a user answer) is omitted rather than shipped, so every
+claim in `company_brain.json` is traceable in `evidence.json`.
 
 ## Development
 

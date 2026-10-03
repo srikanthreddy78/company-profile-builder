@@ -78,7 +78,12 @@ class RunOutcome:
 
     @property
     def exit_code(self) -> int:
-        return 1 if self.status == "failed" else 0
+        # 0: complete/partial/paused (user action); 1: failed; 3: stopped on an error, resumable
+        if self.status == "failed":
+            return 1
+        if self.status == "interrupted":
+            return 3
+        return 0
 
 
 def new_run_id() -> str:
@@ -192,16 +197,22 @@ class Runner:
             f"run {run_id} resumed (status={run.status}, stage={run.stage})",
             kind="resume",
         )
-        if run.status in {"complete", "partial", "failed"}:
+        resuming_partial = run.status == "partial" and bool(clean_overrides)
+        if run.status in {"complete", "partial", "failed"} and not resuming_partial:
             latest = store.latest_draft()
             render_summary(
                 self.console, store, latest[1] if latest else None, run.status, run.output_path
+            )
+            hint = (
+                " Pass --budget-usd / --max-questions to continue a partial run."
+                if run.status == "partial"
+                else " Use `export` to re-export."
             )
             return RunOutcome(
                 run_id,
                 run.status,
                 run.output_path,
-                message=f"run already finished with status {run.status}; use `export` to re-export",
+                message=f"run already finished with status {run.status}.{hint}",
             )
         ctx, agent, config = self._build(
             run_id, run_dir, store, run.start_url, run.product_focus, settings
@@ -209,12 +220,31 @@ class Runner:
         snap = agent.get_state(config)
         if snap.interrupts:
             intr = snap.interrupts[0]
+            committed = self._committed_answer(store, intr.value)
+            if committed is not None:
+                # Crash after the answer was committed but before the checkpoint advanced:
+                # replay with the durable answer instead of asking again.
+                log.info("answer for %s already committed; not re-asking", intr.value.get("qid"))
+                return self._run(ctx, agent, config, Command(resume={intr.id: committed}))
             answer = self._ask(intr.value)
             if answer is None:
                 return self._paused(ctx)
             return self._run(ctx, agent, config, Command(resume={intr.id: answer}))
         if snap.next:
             return self._run(ctx, agent, config, None)
+        if resuming_partial:
+            store.set_status("running")
+            nudge = {
+                "messages": [
+                    HumanMessage(
+                        content=(
+                            f"Limits were raised ({clean_overrides}). Continue the profile: ask the "
+                            "remaining useful questions if any, then call finalize_profile."
+                        )
+                    )
+                ]
+            }
+            return self._run(ctx, agent, config, nudge)
         if not snap.values:
             initial = {
                 "messages": [
@@ -321,6 +351,14 @@ class Runner:
         config = {"configurable": {"thread_id": run_id}}
         return ctx, agent, config
 
+    @staticmethod
+    def _committed_answer(store: RunStore, payload: Any) -> str | None:
+        qid = payload.get("qid") if isinstance(payload, dict) else None
+        q = store.get_question(qid) if qid else None
+        if not q or q["status"] == "pending":
+            return None
+        return {"skipped": "skip", "unknown": "idk"}.get(q["status"], q["answer"] or "skip")
+
     def _resume_cmd(self, run_id: str) -> str:
         extra = f" --runs-dir {self.runs_dir_flag}" if self.runs_dir_flag else ""
         return f"python -m profile_builder resume --run-id {run_id}{extra}"
@@ -419,7 +457,8 @@ class Runner:
                 count=model_calls,
             )
             limit_hit = True
-        if store.has_warning("BUDGET_EXCEEDED"):
+        budget = self.settings.budget_usd
+        if budget is not None and store.total_cost() >= budget:
             limit_hit = True
         if not limit_hit and store.get_counter("finalize_nudges") < MAX_FINALIZE_NUDGES:
             store.increment_counter("finalize_nudges")

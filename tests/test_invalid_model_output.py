@@ -6,7 +6,14 @@ from langchain_core.messages import AIMessage
 
 from profile_builder.state.run_store import RunStore
 from profile_builder.web.scraper import FixtureScraper
-from tests.conftest import DRAFT_EVIDENCE, DRAFT_PROFILE, SITE, make_runner, tool_call
+from tests.conftest import (
+    DRAFT_EVIDENCE,
+    DRAFT_PROFILE,
+    SITE,
+    finalize_steps,
+    make_runner,
+    tool_call,
+)
 
 BAD_PROFILE = {
     **DRAFT_PROFILE,
@@ -31,8 +38,7 @@ def test_invalid_then_repaired(settings, acme_fixtures):
         tool_call(
             "save_profile_draft", {"profile": DRAFT_PROFILE, "evidence": DRAFT_EVIDENCE}, "good"
         ),
-        tool_call("finalize_profile", {}),
-        AIMessage(content="done"),
+        *finalize_steps(),
     ]
     runner, _, _ = make_runner(settings, steps, scraper=FixtureScraper(acme_fixtures))
     outcome = runner.start(f"{SITE}/")
@@ -74,8 +80,7 @@ def test_wrong_argument_types_are_reported_to_model(settings, acme_fixtures):
         *_prefix(),
         tool_call("scrape_pages", {"urls": "not-a-list"}, "badargs"),
         tool_call("save_profile_draft", {"profile": DRAFT_PROFILE, "evidence": DRAFT_EVIDENCE}),
-        tool_call("finalize_profile", {}),
-        AIMessage(content="done"),
+        *finalize_steps(),
     ]
     runner, _, _ = make_runner(settings, steps, scraper=FixtureScraper(acme_fixtures))
     outcome = runner.start(f"{SITE}/")
@@ -95,8 +100,7 @@ def test_later_thin_draft_cannot_erase_earlier_fields(settings, acme_fixtures):
             "save_profile_draft", {"profile": DRAFT_PROFILE, "evidence": DRAFT_EVIDENCE}, "full"
         ),
         tool_call("save_profile_draft", {"profile": thin, "evidence": []}, "thin"),
-        tool_call("finalize_profile", {}),
-        AIMessage(content="done"),
+        *finalize_steps(),
     ]
     runner, _, _ = make_runner(settings, steps, scraper=FixtureScraper(acme_fixtures))
     outcome = runner.start(f"{SITE}/")

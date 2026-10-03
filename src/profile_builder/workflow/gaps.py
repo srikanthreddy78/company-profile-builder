@@ -110,6 +110,9 @@ def empty_gaps(profile: dict[str, Any]) -> list[Gap]:
     return gaps
 
 
+ALWAYS_GROUNDED_PATHS = frozenset({"company.website_url"})  # provided as run input, not a claim
+
+
 def grounding_report(profile: dict[str, Any], evidence_paths: set[str]) -> dict[str, Any]:
     """Count populated leaves and how many have evidence (own path or an ancestor path)."""
     populated = 0
@@ -119,7 +122,7 @@ def grounding_report(profile: dict[str, Any], evidence_paths: set[str]) -> dict[
         if value in ("", [], None):
             continue
         populated += 1
-        if any(a in evidence_paths for a in ancestors(path)):
+        if path in ALWAYS_GROUNDED_PATHS or any(a in evidence_paths for a in ancestors(path)):
             grounded += 1
         else:
             ungrounded.append(path)

@@ -17,6 +17,7 @@ from tests.conftest import (
     DRAFT_EVIDENCE,
     DRAFT_PROFILE,
     SITE,
+    finalize_steps,
     last_tool_result,
     make_runner,
     tool_call,
@@ -175,8 +176,7 @@ def test_evidence_must_mention_value_and_interview_evidence_is_scoped(settings, 
         tool_call("save_profile_draft", {"profile": DRAFT_PROFILE, "evidence": bad_evidence}),
         tool_call("ask_user", q),
         apply,
-        tool_call("finalize_profile", {}),
-        AIMessage(content="done"),
+        *finalize_steps(),
     ]
     runner, _, _ = make_runner(
         settings,

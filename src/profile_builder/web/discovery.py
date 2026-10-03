@@ -122,6 +122,7 @@ def discover(
     timeout_ms: int,
     check_dns: bool = True,
     max_candidates: int = MAX_CANDIDATES_TO_MODEL,
+    homepage: ScrapedPage | None = None,
 ) -> DiscoveryResult:
     """Transient errors propagate (so the retry middleware can retry); permanent map
     failures fall back to homepage links."""
@@ -130,7 +131,8 @@ def discover(
     source = "none"
     # Always start from the homepage: it is the best single page about positioning and its
     # links supplement (or replace) the site map. Transient errors propagate for retry.
-    homepage: ScrapedPage | None = scraper.scrape(start_url, timeout_ms=timeout_ms, with_links=True)
+    if homepage is None:
+        homepage = scraper.scrape(start_url, timeout_ms=timeout_ms, with_links=True)
     try:
         raw = list(scraper.map(start_url, limit=DISCOVERY_MAP_LIMIT, timeout_ms=timeout_ms))
         if raw:

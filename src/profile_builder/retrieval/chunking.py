@@ -11,7 +11,10 @@ from profile_builder.security import normalize_for_match
 
 MAX_CHUNK_CHARS = CHUNK_TOKENS * CHARS_PER_TOKEN
 OVERLAP_CHARS = CHUNK_OVERLAP_TOKENS * CHARS_PER_TOKEN
-MIN_CHUNK_CHARS = 40
+MIN_CHUNK_CHARS = 20
+MIN_PARAGRAPH_CHARS = 12  # shorter than this is noise, not a fact
+NAV_SHORT_LINE_CHARS = 20
+NAV_MIN_LINES = 6
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 _LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
@@ -42,18 +45,18 @@ def _clean_markdown(md: str) -> str:
     return md.strip()
 
 
-_NAV_LINE_RE = re.compile(r"^\s*(?:[-*+•]\s*)?[^.!?]{1,40}$")
+_NAV_LINE_RE = re.compile(rf"^\s*(?:[-*+•]\s*)?[^.!?]{{1,{NAV_SHORT_LINE_CHARS}}}$")
 
 
 def _is_navigational(paragraph: str) -> bool:
-    """Very short items, or blocks made of many short sentence-less lines (menus, footers,
-    cookie banners) → navigation noise."""
-    if len(paragraph) < MIN_CHUNK_CHARS:
+    """Noise, not facts: tiny fragments, or long runs of very short sentence-less lines
+    (menus, footers, cookie banners). Short factual lines and small lists are kept."""
+    if len(paragraph) < MIN_PARAGRAPH_CHARS:
         return True
     lines = [ln for ln in paragraph.splitlines() if ln.strip()]
-    return bool(
-        len(lines) >= 4 and sum(1 for ln in lines if _NAV_LINE_RE.match(ln)) >= 0.75 * len(lines)
-    )
+    return len(lines) >= NAV_MIN_LINES and sum(
+        1 for ln in lines if _NAV_LINE_RE.match(ln)
+    ) >= 0.8 * len(lines)
 
 
 def _split_long(text: str, max_chars: int, overlap: int) -> list[str]:
@@ -89,7 +92,7 @@ def paragraph_hashes(markdown: str) -> set[str]:
     return {
         text_hash(p)
         for p in re.split(r"\n\s*\n", body)
-        if p.strip() and len(p.strip()) >= MIN_CHUNK_CHARS
+        if p.strip() and len(p.strip()) >= MIN_PARAGRAPH_CHARS
     }
 
 

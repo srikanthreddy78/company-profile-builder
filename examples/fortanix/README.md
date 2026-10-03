@@ -17,8 +17,11 @@ uv run python -m profile_builder resume --run-id <run-id>
 | `events.jsonl` / `run.log` | Structured and plain logs: stages, every model and tool attempt with duration/tokens/cost, retries, interrupts, committed answers, warnings. Secrets are redacted. |
 
 Result: status **complete**, 10 pages fetched, 2 interview questions asked (the agent stopped
-early because no useful question remained), 75 of 79 populated fields grounded with verified
-excerpts, 17 model calls with `gpt-5.4`, estimated cost $0.19. Run ids and timestamps in the logs
+early because no useful question remained), 17 model calls with `gpt-5.4`, estimated cost $0.19.
+At export, 75 of 75 populated fields are grounded: one drafted capability (4 fields) whose quoted
+evidence could not be verified verbatim was omitted and recorded as `UNGROUNDED_OMITTED` rather
+than shipped. The artifacts were re-exported from the saved run state with the final code
+(`export --run-id …`); `transcript.txt` is the original live session. Run ids and timestamps in the logs
 belong to this run.
 
 The `quality` tier was used for the committed example because it grounds and phrases more

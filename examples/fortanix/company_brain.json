@@ -29,12 +29,6 @@
         "customer_benefit": "Prevents unauthorized environments and privileged users from accessing protected data or model weights."
       },
       {
-        "name": "CPU and GPU composite attestation",
-        "description": "Verifies both CPU and GPU components for confidential AI and other accelerated workloads.",
-        "how_it_works": "Performs composite attestation across supported CPUs and GPUs to ensure no security gaps exist between independently managed components.",
-        "customer_benefit": "Extends trusted execution and secure key release to AI workloads that run across CPUs and GPUs."
-      },
-      {
         "name": "Multi-cloud and on-prem deployment",
         "description": "Supports confidential computing across cloud providers and on-premises environments.",
         "how_it_works": "Allows customers to enroll computing resources in the cloud or on-premises and deploy existing applications within a secure TEE.",
