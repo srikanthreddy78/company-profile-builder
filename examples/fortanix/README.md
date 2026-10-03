@@ -1,6 +1,7 @@
 # Example run: Fortanix — Confidential Computing Platform
 
-A real, unedited run against https://www.fortanix.com/ (2026-10-02) produced with:
+Re-exported artifacts from an unedited run against https://www.fortanix.com/ (2026-10-02),
+produced with:
 
 ```bash
 uv run python -m profile_builder start --url https://www.fortanix.com/ --product "Confidential Computing Platform" --tier quality
@@ -20,25 +21,35 @@ Result: status **complete**, 10 pages fetched, 2 interview questions asked (the 
 early because no useful question remained), 17 model calls with `gpt-5.4`, estimated cost $0.19.
 At export, 75 of 75 populated fields are grounded: one drafted capability (4 fields) whose quoted
 evidence could not be verified verbatim was omitted and recorded as `UNGROUNDED_OMITTED` rather
-than shipped. The artifacts were re-exported from the saved run state with the final code
-(`export --run-id …`); `transcript.txt` is the original live session. Run ids and timestamps in the logs
-belong to this run.
+than shipped (the live session's summary shows 75/79 *before* that omission). The artifacts
+were re-exported from the saved run state (`export --run-id …`); `transcript.txt` is the
+original live session. Run ids and timestamps in the logs belong to this run.
+
+**These artifacts predate the current code.** They were produced before the per-list-item
+grounding rule (in `evidence.json` a single row such as `customer.buyers` still covers a whole
+list; the current code records `customer.buyers[0]`, `[1]`, … and omits items the excerpt does
+not mention) and before the `interview_only` field was added to `evidence.json`. The example
+will be regenerated with the current code.
 
 The `quality` tier was used for the committed example because it grounds and phrases more
-consistently. The default `fast` tier (`gpt-5-mini`) completes the same run for roughly
-$0.03–0.08 with more variance between runs (typically 40–55 of ~65 fields grounded, and
-occasionally a run that fails cleanly after the single allowed repair attempt).
+consistently. In live runs observed during development (not measured from the committed
+artifacts) the default `fast` tier (`gpt-5-mini`) completed the same run for roughly
+$0.03–0.08 with more variance between runs: typically 40–55 of ~65 fields grounded, and
+occasionally a run that fails cleanly after the single allowed repair attempt.
 
 ## How to read it
 
 - The page cap (10) and question cap (5) applied; the agent stopped asking before the cap when
   no useful question remained, which the brief asks for.
-- Every populated field with website evidence has a verbatim excerpt in `evidence.json`;
-  fields the model filled without accepted evidence are listed under `grounding.ungrounded` and
-  in the report. Rejected evidence (not verbatim, too short, or not mentioning the value) is
-  recorded as `EVIDENCE_REJECTED` warnings rather than silently accepted.
+- Every populated field with website evidence has a verbatim excerpt in `evidence.json`.
+  `grounding.ungrounded` is always empty after export by construction: fields the model filled
+  without accepted evidence are omitted from `company_brain.json` and listed in the
+  `UNGROUNDED_OMITTED` warning (here, the four fields of one capability). Rejected evidence (not
+  verbatim, too short, or not mentioning the value) is recorded as `EVIDENCE_REJECTED` warnings
+  rather than silently accepted.
 - Where an interview answer replaced a website claim, the original website evidence is kept
-  and marked `superseded`, and a `USER_CORRECTION_SUPERSEDES_SITE` warning is recorded.
+  and marked `superseded`, and a `USER_CORRECTION_SUPERSEDES_SITE` warning is recorded (this run
+  had no such correction: both answers filled empty fields).
 
 ## About the interview answers
 
