@@ -17,7 +17,13 @@ from profile_builder.config import (
     STEM_CHARS,
 )
 from profile_builder.retrieval.index import tokenize
-from profile_builder.schema import FieldPathError, base_of, get_by_path, parse_field_path
+from profile_builder.schema import (
+    FEATURE_FIELDS,
+    FieldPathError,
+    base_of,
+    get_by_path,
+    parse_field_path,
+)
 from profile_builder.security import excerpt_in_page
 from profile_builder.state.run_store import RunStore
 from profile_builder.web.url_guard import normalize_url
@@ -48,6 +54,37 @@ def supports(field_path: str, value: Any, text: str) -> bool:
     return not vt or bool(vt & content_stems(text))
 
 
+def unsupported_by_answer(field_path: str, value: Any, answer: str) -> list[str]:
+    """The parts of `value` the user's answer does not support, checked one by one: list
+    items individually, feature objects per non-empty field, a scalar as a whole. Empty
+    when the answer covers everything."""
+    if isinstance(value, list):
+        out: list[str] = []
+        for item in value:
+            if isinstance(item, dict):
+                out.extend(unsupported_by_answer(field_path, item, answer))
+            elif not supports(field_path, item, answer):
+                out.append(str(item))
+        return out
+    if isinstance(value, dict):
+        return [
+            f"{key}: {val}"
+            for key, val in value.items()
+            if val and not supports(f"{field_path}.{key}", val, answer)
+        ]
+    return [] if supports(field_path, value, answer) else [str(value)]
+
+
+def leaf_paths(path: str, value: Any) -> list[str]:
+    """Evidence row paths for a value: list items per index, feature objects per non-empty
+    field, scalars as themselves. Grounding is tracked per leaf."""
+    if isinstance(value, list):
+        return [p for i, item in enumerate(value) for p in leaf_paths(f"{path}[{i}]", item)]
+    if isinstance(value, dict):
+        return [f"{path}.{sub}" for sub in FEATURE_FIELDS if value.get(sub)]
+    return [path]
+
+
 def reject(path: str, code: str, reason: str) -> dict[str, Any]:
     return {"field_path": path, "reason": reason, "reason_code": code}
 
@@ -57,12 +94,63 @@ def descends(path: str, root: str) -> bool:
     return path == root or path.startswith(root + "[") or path.startswith(root + ".")
 
 
+def _feature_rows(
+    path: str, feat: dict[str, Any], excerpt: str, src: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Rows for one feature object: each non-empty subfield is checked on its own, so an
+    excerpt about the mechanism never grounds an invented benefit. Returns (accepted,
+    rejected); accepted is empty when the excerpt supports no subfield at all."""
+    present = [sub for sub in FEATURE_FIELDS if feat.get(sub)]
+    supported = [sub for sub in present if supports(f"{path}.{sub}", feat[sub], excerpt)]
+    if not supported:
+        return [], [
+            reject(
+                path,
+                "NO_OVERLAP",
+                "excerpt does not mention any field of this feature; quote the passage it comes from",
+            )
+        ]
+    accepted = [
+        {"field_path": f"{path}.{sub}", "source_url": src, "excerpt": excerpt} for sub in supported
+    ]
+    rejected = [
+        reject(
+            f"{path}.{sub}",
+            "NO_OVERLAP",
+            "excerpt does not support this feature field; cite the passage it comes from "
+            "separately or leave the field empty",
+        )
+        for sub in present
+        if sub not in supported
+    ]
+    return accepted, rejected
+
+
+def _item_rows(
+    path: str, value: Any, excerpt: str, src: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Rows for one list item (a string, or a feature object)."""
+    if isinstance(value, dict):
+        return _feature_rows(path, value, excerpt, src)
+    if supports(path, value, excerpt):
+        return [{"field_path": path, "source_url": src, "excerpt": excerpt}], []
+    return [], [
+        reject(
+            path,
+            "NO_OVERLAP",
+            "excerpt does not mention this list item; cite the passage it comes from",
+        )
+    ]
+
+
 def verify_website_evidence(
     ctx: ToolContext, profile: dict[str, Any], items: list[dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Accepted rows are per leaf: evidence cited for a whole list is recorded per item
-    (`base[i]`) for exactly the items the excerpt supports; unsupported items are listed
-    back so the model can cite them separately."""
+    (`base[i]`) for exactly the items the excerpt supports, and evidence cited for a feature
+    object is recorded per subfield (`base[i].how_it_works`) for exactly the subfields it
+    supports; unsupported items/subfields are listed back so the model can cite them
+    separately."""
     accepted: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     fetched = ctx.store.fetched_urls()
@@ -116,8 +204,13 @@ def verify_website_evidence(
             )
             continue
         if index is None and isinstance(value, list):
-            supported = [i for i, v in enumerate(value) if supports(path, v, excerpt)]
-            if not supported:
+            acc_rows: list[dict[str, Any]] = []
+            rej_rows: list[dict[str, Any]] = []
+            for i, item in enumerate(value):
+                acc, rej = _item_rows(f"{path}[{i}]", item, excerpt, src_norm)
+                acc_rows.extend(acc)
+                rej_rows.extend(rej)
+            if not acc_rows:
                 rejected.append(
                     reject(
                         path,
@@ -126,19 +219,13 @@ def verify_website_evidence(
                     )
                 )
                 continue
-            for i in range(len(value)):
-                if i in supported:
-                    accepted.append(
-                        {"field_path": f"{path}[{i}]", "source_url": src_norm, "excerpt": excerpt}
-                    )
-                else:
-                    rejected.append(
-                        reject(
-                            f"{path}[{i}]",
-                            "NO_OVERLAP",
-                            "excerpt does not mention this list item; cite the passage it comes from",
-                        )
-                    )
+            accepted.extend(acc_rows)
+            rejected.extend(rej_rows)
+            continue
+        if isinstance(value, dict):  # one feature object: grounded subfield by subfield
+            acc, rej = _feature_rows(path, value, excerpt, src_norm)
+            accepted.extend(acc)
+            rejected.extend(rej)
             continue
         if not supports(path, value, excerpt):
             rejected.append(

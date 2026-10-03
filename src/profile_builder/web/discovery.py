@@ -124,22 +124,28 @@ def discover(
     check_dns: bool = True,
     max_candidates: int = MAX_CANDIDATES_TO_MODEL,
     homepage: ScrapedPage | None = None,
+    fetch_homepage: bool = True,
 ) -> DiscoveryResult:
     """Transient errors propagate (so the retry middleware can retry); permanent map
     failures fall back to homepage links, and a permanent homepage failure (404/403/402) is
-    reported in `homepage_error` while the map candidates are still returned."""
+    reported in `homepage_error` while the map candidates are still returned. With
+    `fetch_homepage=False` (page budget exhausted) and no cached `homepage`, nothing is
+    fetched and the candidates come from the site map alone."""
     notes: list[str] = []
     raw: list[LinkCandidate] = []
     source = "none"
     homepage_error: PermanentScrapeError | None = None
-    # Always start from the homepage: it is the best single page about positioning and its
-    # links supplement (or replace) the site map. Transient errors propagate for retry.
-    if homepage is None:
+    # Start from the homepage when allowed: it is the best single page about positioning
+    # and its links supplement (or replace) the site map. Transient errors propagate for
+    # retry. The homepage is the only page discovery ever fetches.
+    if homepage is None and fetch_homepage:
         try:
             homepage = scraper.scrape(start_url, timeout_ms=timeout_ms, with_links=True)
         except PermanentScrapeError as exc:
             homepage_error = exc
             notes.append(f"homepage unavailable ({exc.code}); relying on the site map")
+    elif homepage is None:
+        notes.append("homepage not fetched (page budget exhausted); using the site map only")
     try:
         raw = list(scraper.map(start_url, limit=DISCOVERY_MAP_LIMIT, timeout_ms=timeout_ms))
         if raw:

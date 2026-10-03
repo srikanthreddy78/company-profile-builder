@@ -116,14 +116,12 @@ ALWAYS_GROUNDED_PATHS = frozenset({"company.website_url"})  # provided as run in
 
 
 def covering_paths(path: str) -> list[str]:
-    """Evidence rows that ground the leaf at `path`: the leaf itself, and for a feature
-    sub-field also the feature item (`base[i]`). A row on a bare list base grounds nothing:
-    every list item needs its own `base[i]` row (evidence is verified per item)."""
-    base, index, sub = parse_field_path(path)
-    out = [path]
-    if sub is not None:
-        out.append(f"{base}[{index}]")
-    return out
+    """Evidence rows that ground the leaf at `path`: only the leaf itself. A row on a bare
+    list base or on a feature item (`base[i]`) grounds nothing: every list item needs its own
+    `base[i]` row and every feature subfield its own `base[i].<sub>` row, because evidence
+    is verified per leaf (an excerpt about a mechanism must not ground an invented benefit)."""
+    parse_field_path(path)
+    return [path]
 
 
 def grounding_report(profile: dict[str, Any], evidence_paths: set[str]) -> dict[str, Any]:

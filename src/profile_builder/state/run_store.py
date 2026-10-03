@@ -523,8 +523,9 @@ class RunStore:
     def replace_website_evidence(
         self, rows: list[dict[str, Any]], *, only_fields: set[str] | None = None
     ) -> None:
-        """Replace non-superseded website evidence. With `only_fields`, only evidence whose
-        base field (e.g. ``customer.buyers``) is in the set is replaced; the rest is kept."""
+        """Replace non-superseded website evidence. With `only_fields`, only evidence under
+        the given paths is replaced (a base such as ``customer.buyers`` covers all its items,
+        an item path such as ``customer.buyers[1]`` only that item); the rest is kept."""
         if only_fields is None:
             self._conn.execute("DELETE FROM evidence WHERE kind='website' AND superseded=0")
         else:

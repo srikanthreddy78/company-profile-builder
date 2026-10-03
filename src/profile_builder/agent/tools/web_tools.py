@@ -26,7 +26,7 @@ from profile_builder.logging_setup import event, get_logger, redact_text
 from profile_builder.security import atomic_write_text
 from profile_builder.web.discovery import discover
 from profile_builder.web.scraper import TransientScrapeError
-from profile_builder.web.url_guard import URLGuardError, same_site, validate_url
+from profile_builder.web.url_guard import URLGuardError, normalize_url, same_site, validate_url
 
 log = get_logger("tools")
 
@@ -48,20 +48,40 @@ def make_web_tools(ctx: ToolContext) -> list[Any]:
             return fail(f"start URL rejected: {exc}")
         if not same_site(url, ctx.start_url):
             return fail("discover_pages only works on the run's website")
+        notes: list[str] = []
+        home = normalize_url(ctx.start_url)
+        if url != home:
+            # Discovery only ever fetches the homepage; any other page goes through
+            # scrape_pages and its budget checks.
+            notes.append(
+                f"discovery always starts from the run's homepage {home}; {url} was not fetched"
+            )
+            url = home
         if not ctx.robots.allowed(url):
             ctx.warn("ROBOTS_DISALLOWED", f"robots.txt disallows fetching {url}")
             return fail("robots.txt disallows the homepage; no pages can be fetched")
         cached_home = ctx.cached_page(url)
+        # Check the budgets BEFORE any live fetch: a repeated discover call must not scrape
+        # past max_pages (or the fetch-attempt cap). Without budget the cached homepage is
+        # reused if present, otherwise discovery runs from the site map alone.
+        max_attempts = settings.max_pages * SCRAPE_ATTEMPTS_PER_PAGE
+        live_fetch = (
+            cached_home is None
+            and ctx.page_budget_remaining() > 0
+            and store.get_counter("scrape_attempts") < max_attempts
+        )
         result = discover(
             url,
             ctx.scraper,
             timeout_ms=settings.scrape_timeout_ms,
             check_dns=ctx.check_dns,
             homepage=cached_home,
+            fetch_homepage=live_fetch,
         )
-        if cached_home is None:
+        if live_fetch:
             store.increment_counter("scrape_attempts")  # a live homepage fetch was attempted
-        for note in result.notes:
+        notes.extend(result.notes)
+        for note in notes:
             ctx.warn("DISCOVERY_NOTE", note)
         if result.homepage_error is not None:
             # Permanent homepage failure (404/403/402...): record it, keep going with the map.
@@ -86,7 +106,7 @@ def make_web_tools(ctx: ToolContext) -> list[Any]:
                             "discovered. Check the start URL (scheme, www vs. non-www, trailing "
                             "path) or start from another page of the same site."
                         ),
-                        "notes": result.notes,
+                        "notes": notes,
                     }
                 )
         if result.homepage is not None and ctx.page_budget_remaining() > 0:
@@ -115,7 +135,7 @@ def make_web_tools(ctx: ToolContext) -> list[Any]:
             ],
             already_fetched=sorted(store.fetched_urls()),
             page_budget_remaining=ctx.page_budget_remaining(),
-            notes=result.notes,
+            notes=notes,
         )
 
     @tool

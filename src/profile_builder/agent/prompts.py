@@ -25,7 +25,10 @@ content agents, so every statement must be supported by website evidence or by t
   `features_and_capabilities` etc. give one evidence item per list entry using its index
   ("customer.use_cases[1]", "product.features_and_capabilities[0]"). An excerpt cited for a
   whole list only grounds the entries it actually mentions; the others are reported as
-  ungrounded and omitted at export.
+  ungrounded and omitted at export. Likewise an excerpt cited for a feature grounds only the
+  subfields it supports (name, description, how_it_works, customer_benefit); cite e.g.
+  "product.features_and_capabilities[0].customer_benefit" separately when the benefit comes
+  from another passage.
 
 ## Workflow
 1. `discover_pages` → review the scored candidates and pick the pages most likely to explain the

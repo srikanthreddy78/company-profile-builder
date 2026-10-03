@@ -4,6 +4,9 @@ else: sources, questions, warnings, conflicts, usage) and report.md (human summa
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -15,7 +18,7 @@ from profile_builder.config import (
     REPORT_FILENAME,
 )
 from profile_builder.schema import CompanyBrain
-from profile_builder.security import atomic_write_text, strip_control
+from profile_builder.security import strip_control
 from profile_builder.state.run_store import RunStore
 from profile_builder.workflow.gaps import empty_gaps, grounding_report, section_coverage
 
@@ -158,21 +161,86 @@ def build_report(store: RunStore, profile: dict[str, Any], status: str, output_p
     return "\n".join(lines) + "\n"
 
 
+def _unlink_quietly(path: Path | str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _stage(target: Path, text: str, mode: int) -> Path:
+    """Write `text` to a temp file next to `target` (fsynced, with the final mode)."""
+    fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=str(target.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, mode)
+    except Exception:
+        _unlink_quietly(tmp)
+        raise
+    return Path(tmp)
+
+
+def write_all_or_nothing(artifacts: list[tuple[Path, str, int]]) -> None:
+    """Publish several files as one unit: every artifact is staged to a temp file first,
+    then renamed into place in sequence. If anything fails, the outputs already renamed are
+    rolled back (the previous version is restored from a backup copy when one existed,
+    otherwise the file is removed) and no temp or backup file is left behind."""
+    staged: list[tuple[Path, Path]] = []
+    published: list[tuple[Path, Path | None]] = []  # (target, backup of the previous version)
+    try:
+        for target, text, mode in artifacts:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            staged.append((target, _stage(target, text, mode)))
+        for target, tmp in staged:
+            backup: Path | None = None
+            if target.exists():
+                fd, name = tempfile.mkstemp(prefix=".tmp-bak-", dir=str(target.parent))
+                os.close(fd)
+                backup = Path(name)
+                shutil.copy2(target, backup)
+            try:
+                os.replace(tmp, target)
+            except BaseException:
+                # the target itself is untouched; only its backup copy needs to go
+                if backup is not None:
+                    _unlink_quietly(backup)
+                raise
+            published.append((target, backup))
+    except BaseException:
+        for target, backup in reversed(published):
+            if backup is not None:
+                os.replace(backup, target)
+            else:
+                _unlink_quietly(target)
+        for _target, tmp in staged:
+            _unlink_quietly(tmp)
+        raise
+    for _target, backup in published:
+        if backup is not None:
+            _unlink_quietly(backup)
+
+
 def write_outputs(run_dir: Path, store: RunStore, profile: dict[str, Any], status: str) -> Path:
-    """Validate once more and write all three artifacts atomically. Raises on invalid profile."""
+    """Validate once more and write all three artifacts as one unit: either every output
+    is replaced or (on any failure) the previous set is left exactly as it was. Raises on an
+    invalid profile."""
     brain = CompanyBrain.model_validate(profile)
     output_path = run_dir / OUTPUT_FILENAME
-    atomic_write_text(output_path, brain.to_json(), mode=0o644)
-    evidence_doc = build_evidence_document(store, brain.model_dump(mode="json"), status)
+    dumped = brain.model_dump(mode="json")
+    evidence_doc = build_evidence_document(store, dumped, status)
     # evidence.json and report.md contain interview answers → private; the profile is public-derived.
-    atomic_write_text(
-        run_dir / EVIDENCE_FILENAME,
-        json.dumps(evidence_doc, indent=2, ensure_ascii=False) + "\n",
-        mode=0o600,
-    )
-    atomic_write_text(
-        run_dir / REPORT_FILENAME,
-        build_report(store, brain.model_dump(mode="json"), status, output_path),
-        mode=0o600,
+    write_all_or_nothing(
+        [
+            (output_path, brain.to_json(), 0o644),
+            (
+                run_dir / EVIDENCE_FILENAME,
+                json.dumps(evidence_doc, indent=2, ensure_ascii=False) + "\n",
+                0o600,
+            ),
+            (run_dir / REPORT_FILENAME, build_report(store, dumped, status, output_path), 0o600),
+        ]
     )
     return output_path

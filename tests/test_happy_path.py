@@ -12,7 +12,6 @@ from profile_builder.schema import json_schema
 from profile_builder.state.run_store import RunStore
 from profile_builder.web.scraper import FixtureScraper, ScrapedPage
 from tests.conftest import (
-    DRAFT_EVIDENCE,
     FABRICATED_EVIDENCE_PATHS,
     SITE,
     expected_website_rows,
@@ -57,11 +56,12 @@ def test_happy_path_exports_valid_profile(settings, acme_fixtures):
     assert f"{SITE}/" in fetched and f"{SITE}/product" in fetched
     assert len(fetched) == settings.max_pages
     assert store.has_warning("LIMIT_PAGES_REACHED")
-    # evidence: the fabricated excerpt was rejected, every other item produced one row
+    # evidence: the fabricated excerpt was rejected, every other item produced exactly its
+    # per-leaf rows (one per list item / populated feature subfield)
     rejected = [w for w in store.list_warnings() if w["code"] == "EVIDENCE_REJECTED"]
     assert {w["details"]["field_path"] for w in rejected} == FABRICATED_EVIDENCE_PATHS
     website_rows = [e for e in store.list_evidence() if e["kind"] == "website"]
-    assert len(website_rows) == len(DRAFT_EVIDENCE) - len(FABRICATED_EVIDENCE_PATHS)
+    assert len(website_rows) == len(expected_website_rows())
     assert {e["field_path"] for e in website_rows} == expected_website_rows()
     assert brain["customer"]["use_cases"] == [
         "Fraud analytics in enclaves",

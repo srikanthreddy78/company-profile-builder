@@ -863,7 +863,7 @@ def _ghost_feature_steps(ghost):
         {
             "field_path": "product.features_and_capabilities[1]",
             "source_url": f"{SITE}/product",
-            "excerpt": "Runtime encryption protects data while it is processed in memory. It uses Intel SGX and AMD SEV enclaves.",
+            "excerpt": "Runtime encryption protects data while it is processed in memory. It uses Intel SGX and AMD SEV enclaves. Customers can run sensitive analytics without exposing plaintext to the cloud provider.",
         }
     )
     return [
@@ -891,7 +891,8 @@ def test_F9_empty_feature_removal_reindexes_evidence(settings, acme_fixtures):
     assert evdoc["grounding"]["ungrounded"] == [], evdoc["grounding"]["ungrounded"]
     store = RunStore(settings.runs_dir / outcome.run_id)
     assert {e["field_path"] for e in store.list_evidence() if "features" in e["field_path"]} == {
-        "product.features_and_capabilities[0]"
+        f"product.features_and_capabilities[0].{sub}"
+        for sub in ("name", "description", "how_it_works", "customer_benefit")
     }
     runner.export(outcome.run_id)
     assert _brain(settings, outcome.run_id)["product"]["features_and_capabilities"] == expected
@@ -1102,9 +1103,9 @@ def test_G1_base_row_does_not_cover_list_items():
     from profile_builder.workflow.gaps import covering_paths, grounding_report
 
     assert covering_paths("customer.buyers[1]") == ["customer.buyers[1]"]
+    # since round 4 a feature item row does not cover its subfields either (per-leaf grounding)
     assert covering_paths("product.features_and_capabilities[0].how_it_works") == [
         "product.features_and_capabilities[0].how_it_works",
-        "product.features_and_capabilities[0]",
     ]
     profile = copy.deepcopy(DRAFT_PROFILE)
     profile["customer"]["buyers"] = ["a", "b"]
@@ -1113,7 +1114,13 @@ def test_G1_base_row_does_not_cover_list_items():
         "customer.buyers[1]" in report["ungrounded"]
         and "customer.buyers[0]" not in report["ungrounded"]
     )
-    report = grounding_report(profile, {"product.features_and_capabilities[0]"})
+    report = grounding_report(
+        profile,
+        {
+            f"product.features_and_capabilities[0].{sub}"
+            for sub in ("name", "description", "how_it_works", "customer_benefit")
+        },
+    )
     assert not [
         p for p in report["ungrounded"] if p.startswith("product.features_and_capabilities[0]")
     ]

@@ -372,7 +372,8 @@ DRAFT_PROFILE: dict[str, Any] = {
 }
 
 # Each entry yields exactly one accepted evidence row (list items are cited per item, or
-# the list has a single item), except the deliberately fabricated last one.
+# the list has a single item), except feature citations (one row per populated subfield)
+# and the deliberately fabricated last one.
 DRAFT_EVIDENCE: list[dict[str, str]] = [
     {
         "field_path": "product.name",
@@ -390,9 +391,11 @@ DRAFT_EVIDENCE: list[dict[str, str]] = [
         "excerpt": "Acme Vault protects data during computation, not only at rest.",
     },
     {
+        # A feature citation grounds each subfield on its own, so the excerpt must cover
+        # the benefit sentence too.
         "field_path": "product.features_and_capabilities[0]",
         "source_url": f"{SITE}/product",
-        "excerpt": "Runtime encryption protects data while it is processed in memory. It uses Intel SGX and AMD SEV enclaves.",
+        "excerpt": "Runtime encryption protects data while it is processed in memory. It uses Intel SGX and AMD SEV enclaves. Customers can run sensitive analytics without exposing plaintext to the cloud provider.",
     },
     {
         "field_path": "product.features_and_capabilities[1]",
@@ -471,15 +474,19 @@ FABRICATED_EVIDENCE_PATHS = {"company.name"}
 
 def expected_website_rows(evidence: list[dict[str, str]] = DRAFT_EVIDENCE) -> set[str]:
     """Evidence row paths the draft evidence must produce: list citations are stored per
-    item, so a base-level citation of a single-item list becomes ``base[0]``."""
-    from profile_builder.schema import STRING_PATHS, get_by_path
+    item, so a base-level citation of a single-item list becomes ``base[0]``; a feature
+    citation is stored per populated subfield (``base[i].name`` ...)."""
+    from profile_builder.schema import FEATURE_FIELDS, FEATURE_LIST_PATH, STRING_PATHS, get_by_path
 
     out: set[str] = set()
     for e in evidence:
         path = e["field_path"]
         if path in FABRICATED_EVIDENCE_PATHS:
             continue
-        if path in STRING_PATHS or "[" in path:
+        if path.startswith(FEATURE_LIST_PATH + "["):
+            feat = get_by_path(DRAFT_PROFILE, path)
+            out.update(f"{path}.{sub}" for sub in FEATURE_FIELDS if feat.get(sub))
+        elif path in STRING_PATHS or "[" in path:
             out.add(path)
         else:
             out.update(f"{path}[{i}]" for i in range(len(get_by_path(DRAFT_PROFILE, path))))

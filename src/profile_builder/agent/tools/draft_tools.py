@@ -22,8 +22,9 @@ from profile_builder.agent.drafting import (
 )
 from profile_builder.agent.evidence import (
     descends,
+    leaf_paths,
     reject,
-    supports,
+    unsupported_by_answer,
     verify_website_evidence,
 )
 from profile_builder.agent.finalize import (
@@ -98,8 +99,11 @@ def make_draft_tools(ctx: ToolContext) -> list[Any]:
         )
         # Replace evidence only where the value changed or fresh evidence was supplied, so an
         # unchanged field never loses its grounding because the model omitted the evidence.
-        replace_bases = (merged.changed | {base_of(a["field_path"]) for a in accepted}) - user_bases
-        store.replace_website_evidence(accepted, only_fields=replace_bases)
+        # For an unchanged list, fresh evidence refreshes only the items it was accepted
+        # for; the sibling items keep their existing rows.
+        changed = merged.changed - user_bases
+        refreshed = {a["field_path"] for a in accepted if base_of(a["field_path"]) not in changed}
+        store.replace_website_evidence(accepted, only_fields=changed | refreshed)
         for r in rejected:
             ctx.warn(
                 "EVIDENCE_REJECTED",
@@ -190,9 +194,20 @@ def make_draft_tools(ctx: ToolContext) -> list[Any]:
                         )
                     )
                     continue
-                if not supports(path, upd.get("value"), q["answer"] or ""):
+                # Each list item / feature field must be reflected in the answer on its own,
+                # so one supported item cannot smuggle invented siblings past the check.
+                unsupported = unsupported_by_answer(path, upd.get("value"), q["answer"] or "")
+                if unsupported:
                     rejected.append(
-                        reject(path, "ANSWER_MISMATCH", "value does not reflect the user's answer")
+                        {
+                            **reject(
+                                path,
+                                "ANSWER_MISMATCH",
+                                "value does not reflect the user's answer; not supported by it: "
+                                + "; ".join(unsupported[:8]),
+                            ),
+                            "unsupported": unsupported,
+                        }
                     )
                     continue
             elif kind == "website":
@@ -273,6 +288,8 @@ def make_draft_tools(ctx: ToolContext) -> list[Any]:
                         "value": upd.get("value"),
                     }
                 )
+                # From here on the field is user-owned, also for the rest of this batch.
+                user_bases.add(base_of(path))
             applied.append(path)
         if not applied:
             return to_json(
@@ -306,16 +323,10 @@ def make_draft_tools(ctx: ToolContext) -> list[Any]:
                         "USER_CORRECTION_SUPERSEDES_SITE",
                         f"{path}: user answer replaced the website claim (original evidence preserved)",
                     )
-                # A whole-list answer grounds every item: record evidence per item so
-                # grounding, omission and re-indexing work at item level.
-                _base, index, _sub = parse_field_path(path)
-                new_val = get_by_path(clean, path)
-                rows = (
-                    [f"{path}[{i}]" for i in range(len(new_val))]
-                    if index is None and isinstance(new_val, list)
-                    else [path]
-                )
-                for row_path in rows:
+                # A whole-list / whole-feature answer grounds every item or subfield it was
+                # checked against: record evidence per leaf so grounding, omission and
+                # re-indexing work at leaf level.
+                for row_path in leaf_paths(path, get_by_path(clean, path)):
                     store.add_evidence(
                         row_path, "interview", question_id=ev["question_id"], answer=ev["answer"]
                     )
