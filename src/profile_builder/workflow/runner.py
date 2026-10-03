@@ -177,6 +177,9 @@ class Runner:
             start_url = validate_url(url, check_dns=self.check_dns)
         except URLGuardError as exc:
             raise ValueError(f"URL rejected: {exc}") from exc
+        # Fail on missing provider credentials before anything is written to disk.
+        scraper = self.scraper_factory(self.settings)
+        model = self.model_factory(self.settings)
         run_id = new_run_id()
         run_dir = safe_child(self.settings.runs_dir, run_id)
         run_dir.mkdir(parents=True, exist_ok=False)
@@ -187,7 +190,9 @@ class Runner:
         store.create_run(run_id, start_url, product, self.settings.snapshot())
         event(log, "run_started", f"run {run_id} started for {start_url}", kind="start")
         log.info("settings: %s", store.get_run().settings)
-        ctx, agent, config = self._build(run_id, run_dir, store, start_url, product, self.settings)
+        ctx, agent, config = self._build(
+            run_id, run_dir, store, start_url, product, self.settings, scraper=scraper, model=model
+        )
         self.console.print(
             f"[bold]Run id:[/bold] {run_id}  [dim](resume later with: {self._resume_cmd(run_id)})[/dim]"
         )
@@ -358,10 +363,13 @@ class Runner:
         start_url: str,
         product: str | None,
         settings: Settings,
+        *,
+        scraper: Scraper | None = None,
+        model: BaseChatModel | None = None,
     ):
-        scraper = self.scraper_factory(settings)
+        scraper = scraper if scraper is not None else self.scraper_factory(settings)
         ctx = self._context(run_id, run_dir, store, start_url, product, settings, scraper)
-        model = self.model_factory(settings)
+        model = model if model is not None else self.model_factory(settings)
         checkpointer = build_checkpointer(run_dir)
         agent = build_agent(ctx, model, checkpointer)
         config = {"configurable": {"thread_id": run_id}}
