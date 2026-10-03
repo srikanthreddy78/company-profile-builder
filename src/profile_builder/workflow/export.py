@@ -17,10 +17,13 @@ from profile_builder.config import (
     OUTPUT_FILENAME,
     REPORT_FILENAME,
 )
+from profile_builder.logging_setup import event, get_logger
 from profile_builder.schema import CompanyBrain
-from profile_builder.security import strip_control
+from profile_builder.security import SecurityError, atomic_write_text, safe_child, strip_control
 from profile_builder.state.run_store import RunStore
 from profile_builder.workflow.gaps import empty_gaps, grounding_report, section_coverage
+
+log = get_logger("export")
 
 
 def _md(text: object, limit: int = 400) -> str:
@@ -183,50 +186,128 @@ def _stage(target: Path, text: str, mode: int) -> Path:
     return Path(tmp)
 
 
-def write_all_or_nothing(artifacts: list[tuple[Path, str, int]]) -> None:
-    """Publish several files as one unit: every artifact is staged to a temp file first,
-    then renamed into place in sequence. If anything fails, the outputs already renamed are
-    rolled back (the previous version is restored from a backup copy when one existed,
-    otherwise the file is removed) and no temp or backup file is left behind."""
-    staged: list[tuple[Path, Path]] = []
-    published: list[tuple[Path, Path | None]] = []  # (target, backup of the previous version)
+PUBLISH_JOURNAL_FILENAME = ".publish-journal.json"
+
+
+def _journal_paths(base: Path, entry: dict[str, Any]) -> tuple[Path, Path | None, Path | None]:
+    """(target, backup, staged) of one journal entry, confined to the run directory."""
+    base = base.resolve()
+    target = safe_child(base, str(entry.get("target") or ""))
+    if target == base:
+        raise SecurityError("journal entry without a target")
+    backup = safe_child(base, str(entry["backup"])) if entry.get("backup") else None
+    staged = safe_child(base, str(entry["staged"])) if entry.get("staged") else None
+    return target, backup, staged
+
+
+def _undo_publish(base: Path, entries: list[dict[str, Any]]) -> list[str]:
+    """Undo the renames listed in journal entries: every target is restored from its backup
+    (or removed when it did not exist before) and staged temp files are deleted. Returns the
+    names of the targets put back."""
+    restored: list[str] = []
+    for entry in reversed(entries):
+        try:
+            target, backup, staged = _journal_paths(base, entry)
+        except SecurityError:
+            continue
+        if staged is not None:
+            _unlink_quietly(staged)
+        if backup is None:
+            if target.exists():
+                os.unlink(target)
+                restored.append(target.name)
+        elif backup.exists():
+            os.replace(backup, target)
+            restored.append(target.name)
+    return restored
+
+
+def write_all_or_nothing(artifacts: list[tuple[Path, str, int]], *, journal: Path) -> None:
+    """Publish several files as one set: every artifact is staged to a temp file first, then
+    renamed into place in sequence (each rename is atomic on its own). Before the first
+    rename a publish journal is written next to the outputs listing every target with its
+    backup copy (``null`` when the file did not exist); it is deleted only after the last
+    rename, so the publish is committed exactly when the journal disappears.
+
+    An ordinary exception is rolled back here (previous versions restored from the backups,
+    new files removed) and leaves no journal, temp or backup file behind. A BaseException
+    (Ctrl-C, SystemExit) is treated like a process kill: it propagates at once and the
+    journal lets `recover_interrupted_publish` repair the set on the next command."""
+    base = journal.parent
+    staged: list[Path] = []
+    entries: list[dict[str, Any]] = []
     try:
         for target, text, mode in artifacts:
             target.parent.mkdir(parents=True, exist_ok=True)
-            staged.append((target, _stage(target, text, mode)))
-        for target, tmp in staged:
+            tmp = _stage(target, text, mode)
+            staged.append(tmp)
             backup: Path | None = None
             if target.exists():
                 fd, name = tempfile.mkstemp(prefix=".tmp-bak-", dir=str(target.parent))
                 os.close(fd)
                 backup = Path(name)
                 shutil.copy2(target, backup)
-            try:
-                os.replace(tmp, target)
-            except BaseException:
-                # the target itself is untouched; only its backup copy needs to go
-                if backup is not None:
-                    _unlink_quietly(backup)
-                raise
-            published.append((target, backup))
-    except BaseException:
-        for target, backup in reversed(published):
-            if backup is not None:
-                os.replace(backup, target)
-            else:
-                _unlink_quietly(target)
-        for _target, tmp in staged:
+            entries.append(
+                {
+                    "target": os.path.relpath(target, base),
+                    "backup": os.path.relpath(backup, base) if backup is not None else None,
+                    "staged": os.path.relpath(tmp, base),
+                }
+            )
+        atomic_write_text(journal, json.dumps({"version": 1, "targets": entries}, indent=2) + "\n")
+        renamed = 0
+        for (target, _text, _mode), tmp in zip(artifacts, staged, strict=True):
+            os.replace(tmp, target)
+            renamed += 1
+    except Exception:
+        # Only the targets actually renamed are put back; the others are untouched, so
+        # their backups and temp files are simply discarded.
+        _undo_publish(base, entries[:renamed])
+        for entry in entries[renamed:]:
+            if entry["backup"]:
+                _unlink_quietly(base / entry["backup"])
+        for tmp in staged:
             _unlink_quietly(tmp)
+        _unlink_quietly(journal)
         raise
-    for _target, backup in published:
-        if backup is not None:
-            _unlink_quietly(backup)
+    _unlink_quietly(journal)  # committed: from here on a kill leaves at most stray backups
+    for entry in entries:
+        if entry["backup"]:
+            _unlink_quietly(base / entry["backup"])
+
+
+def recover_interrupted_publish(run_dir: Path) -> bool:
+    """Repair outputs left half-published by a process killed between renames: every target
+    listed in the publish journal is restored from its backup (or removed when it did not
+    exist before), then the journal is deleted. Idempotent and silent when there is no
+    journal; returns True (and logs `publish_recovered`) when a journal was processed."""
+    journal = run_dir / PUBLISH_JOURNAL_FILENAME
+    if not journal.exists():
+        return False
+    entries: list[dict[str, Any]] = []
+    try:
+        data = json.loads(journal.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            entries = [e for e in (data.get("targets") or []) if isinstance(e, dict)]
+    except (OSError, ValueError):
+        log.warning("publish journal %s is unreadable; removing it", journal)
+    restored = _undo_publish(run_dir, entries)
+    _unlink_quietly(journal)
+    event(
+        log,
+        "publish_recovered",
+        "interrupted publish repaired from the journal: previous set restored "
+        + (f"({', '.join(restored)})" if restored else "(nothing to undo)"),
+        count=len(restored),
+    )
+    return True
 
 
 def write_outputs(run_dir: Path, store: RunStore, profile: dict[str, Any], status: str) -> Path:
-    """Validate once more and write all three artifacts as one unit: either every output
-    is replaced or (on any failure) the previous set is left exactly as it was. Raises on an
-    invalid profile."""
+    """Validate once more and write all three artifacts as one set: either every output is
+    replaced or (on any failure) the previous set is left exactly as it was; a set left
+    half-published by an earlier kill is repaired first. Raises on an invalid profile."""
+    recover_interrupted_publish(run_dir)
     brain = CompanyBrain.model_validate(profile)
     output_path = run_dir / OUTPUT_FILENAME
     dumped = brain.model_dump(mode="json")
@@ -241,6 +322,7 @@ def write_outputs(run_dir: Path, store: RunStore, profile: dict[str, Any], statu
                 0o600,
             ),
             (run_dir / REPORT_FILENAME, build_report(store, dumped, status, output_path), 0o600),
-        ]
+        ],
+        journal=run_dir / PUBLISH_JOURNAL_FILENAME,
     )
     return output_path

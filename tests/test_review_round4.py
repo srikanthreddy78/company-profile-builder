@@ -371,7 +371,7 @@ def test_R4_discover_never_fetches_a_non_homepage_url(settings, acme_fixtures):
 
 def test_R4_discover_without_homepage_fetch_uses_the_map_only(acme_fixtures):
     scraper = FixtureScraper(acme_fixtures)
-    result = discover(f"{SITE}/", scraper, timeout_ms=1000, check_dns=False, fetch_homepage=False)
+    result = discover(f"{SITE}/", scraper, timeout_ms=1000, check_dns=False)
     assert [c for c in scraper.calls if c[0] == "scrape"] == []
     assert result.homepage is None and result.homepage_error is None
     assert result.source == "map" and f"{SITE}/product" in {c.url for c in result.candidates}

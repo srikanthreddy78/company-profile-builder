@@ -25,7 +25,11 @@ from profile_builder.config import (
 from profile_builder.logging_setup import event, get_logger, redact_text
 from profile_builder.security import atomic_write_text
 from profile_builder.web.discovery import discover
-from profile_builder.web.scraper import TransientScrapeError
+from profile_builder.web.scraper import (
+    PermanentScrapeError,
+    TransientScrapeError,
+    is_transient_code,
+)
 from profile_builder.web.url_guard import URLGuardError, normalize_url, same_site, validate_url
 
 log = get_logger("tools")
@@ -60,57 +64,92 @@ def make_web_tools(ctx: ToolContext) -> list[Any]:
         if not ctx.robots.allowed(url):
             ctx.warn("ROBOTS_DISALLOWED", f"robots.txt disallows fetching {url}")
             return fail("robots.txt disallows the homepage; no pages can be fetched")
-        cached_home = ctx.cached_page(url)
-        # Check the budgets BEFORE any live fetch: a repeated discover call must not scrape
-        # past max_pages (or the fetch-attempt cap). Without budget the cached homepage is
-        # reused if present, otherwise discovery runs from the site map alone.
         max_attempts = settings.max_pages * SCRAPE_ATTEMPTS_PER_PAGE
-        live_fetch = (
-            cached_home is None
-            and ctx.page_budget_remaining() > 0
-            and store.get_counter("scrape_attempts") < max_attempts
-        )
-        result = discover(
-            url,
-            ctx.scraper,
-            timeout_ms=settings.scrape_timeout_ms,
-            check_dns=ctx.check_dns,
-            homepage=cached_home,
-            fetch_homepage=live_fetch,
-        )
-        if live_fetch:
-            store.increment_counter("scrape_attempts")  # a live homepage fetch was attempted
+        # The homepage goes through the same accounting as scrape_pages BEFORE the site map
+        # is consulted: one counted live fetch, processed (cached, indexed, recorded) at once.
+        # A transient map failure retried by the middleware then finds it in the cache and
+        # never re-scrapes it; without budget, discovery runs from the site map alone.
+        homepage = ctx.cached_page(url)
+        homepage_error: PermanentScrapeError | None = None
+        known = store.get_page(url)
+        if homepage is not None:
+            if known is None or known.status != "fetched":
+                process_page(ctx, homepage, url)  # crash replay: cached but not yet recorded
+        elif (
+            known is not None
+            and known.status == "failed"
+            and not is_transient_code(known.error_code)
+        ):
+            # Permanent homepage failure (404/403/402...) recorded by an earlier call.
+            homepage_error = PermanentScrapeError(
+                known.error or "homepage unavailable",
+                code=known.error_code or "PERMANENT",
+                http_status=known.http_status,
+            )
+        elif store.get_counter("scrape_attempts") >= max_attempts:
+            ctx.warn_once(
+                "LIMIT_SCRAPE_ATTEMPTS_REACHED", f"fetch attempt limit of {max_attempts} reached"
+            )
+            notes.append(
+                "homepage not fetched (fetch attempt budget exhausted); using the site map only"
+            )
+        elif ctx.page_budget_remaining() <= 0:
+            notes.append("homepage not fetched (page budget exhausted); using the site map only")
+        else:
+            fetched = fetch_live(ctx, url, pace=False, with_links=True)
+            if fetched.transient is not None:
+                raise fetched.transient  # the attempt is counted; the middleware retries
+            if fetched.page is None:
+                homepage_error = fetched.permanent  # recorded + warned by fetch_live
+            else:
+                homepage = fetched.page
+                process_page(ctx, homepage, url)
+        try:
+            result = discover(
+                url,
+                ctx.scraper,
+                timeout_ms=settings.scrape_timeout_ms,
+                check_dns=ctx.check_dns,
+                homepage=homepage,
+                homepage_error=homepage_error,
+            )
+        except TransientScrapeError as exc:
+            # Only the site map can fail here; the homepage is already cached and counted,
+            # so a retry costs nothing. After MAX_RETRIES transient map failures in this run
+            # the map is given up and the homepage links are used (with no homepage there is
+            # nothing to fall back to, so the error keeps propagating).
+            failures = store.increment_counter("map_transient_failures")
+            if homepage is None or failures <= settings.max_retries:
+                raise
+            notes.append(
+                f"site map unavailable after {failures} attempts ({exc.code}); using homepage links"
+            )
+            result = discover(
+                url,
+                ctx.scraper,
+                timeout_ms=settings.scrape_timeout_ms,
+                check_dns=ctx.check_dns,
+                homepage=homepage,
+                homepage_error=homepage_error,
+                use_map=False,
+            )
         notes.extend(result.notes)
         for note in notes:
             ctx.warn("DISCOVERY_NOTE", note)
-        if result.homepage_error is not None:
-            # Permanent homepage failure (404/403/402...): record it, keep going with the map.
-            exc = result.homepage_error
-            err = redact_text(str(exc))
-            record_unusable_page(
-                ctx,
-                url,
-                status="failed",
-                error_code=exc.code,
-                error=err,
-                http_status=exc.http_status,
+        if homepage_error is not None and not result.candidates:
+            err = redact_text(str(homepage_error))
+            return to_json(
+                {
+                    "ok": False,
+                    "error_code": "HOMEPAGE_UNAVAILABLE",
+                    "error": (
+                        f"the homepage could not be fetched ({err}) and no other page was "
+                        "discovered. Check the start URL (scheme, www vs. non-www, trailing "
+                        "path) or start from another page of the same site."
+                    ),
+                    "notes": notes,
+                }
             )
-            ctx.warn(f"PAGE_SKIPPED_{exc.code}", f"{url} skipped: {err}")
-            if not result.candidates:
-                return to_json(
-                    {
-                        "ok": False,
-                        "error_code": "HOMEPAGE_UNAVAILABLE",
-                        "error": (
-                            f"the homepage could not be fetched ({err}) and no other page was "
-                            "discovered. Check the start URL (scheme, www vs. non-www, trailing "
-                            "path) or start from another page of the same site."
-                        ),
-                        "notes": notes,
-                    }
-                )
-        if result.homepage is not None and ctx.page_budget_remaining() > 0:
-            process_page(ctx, result.homepage, url)
         event(
             log,
             "pages_discovered",

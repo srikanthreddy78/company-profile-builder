@@ -131,12 +131,17 @@ Settings are snapshotted into the run at `start`; `resume` reuses them unless
 `--max-questions`/`--budget-usd` are passed explicitly (recorded as
 `SETTINGS_OVERRIDDEN_ON_RESUME`).
 
-**Finalize is atomic.** `finalize()` computes conflict and grounding omissions on a copy of the The three output files are published all-or-nothing: each is staged to a temp file and renamed in sequence, and on any failure already-renamed files are restored from a backup (or removed), so a crash mid-export never leaves a partial set.
+**Finalize is atomic.** `finalize()` computes conflict and grounding omissions on a copy of the
 draft with an in-memory view of the evidence paths, validates the result with Pydantic, and only
 then opens one SQLite transaction in which the warnings, conflict statuses, evidence re-indexing
 (list items renumbered after deletions), the output write and the status change are applied.
 A validation failure leaves the store untouched; a failed write rolls everything back; a
-re-export recomputes the same omissions from the same state.
+re-export recomputes the same omissions from the same state. The three output files are
+published as one set: each file is replaced atomically (staged to a temp file, then renamed),
+the set is published in sequence, a failure restores the previous set, and a process kill
+between renames is repaired from the publish journal (`.publish-journal.json`) on the next
+`start` / `resume` / `export` / `status` / `inspect`, so readers may observe a half-published
+set only in that window.
 
 ## Run lifecycle and statuses
 

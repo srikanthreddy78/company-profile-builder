@@ -37,6 +37,12 @@ def content_stems(text: str) -> set[str]:
     return {t[:STEM_CHARS] for t in tokenize(text) if len(t) >= MIN_CONTENT_TOKEN_CHARS}
 
 
+def short_tokens(text: str) -> set[str]:
+    """Tokens too short to stem (acronyms such as CIO, SGX, B2B). They are compared exactly,
+    so "CIO" never matches "CISO" on a shared prefix."""
+    return {t for t in tokenize(text) if len(t) < MIN_CONTENT_TOKEN_CHARS}
+
+
 def value_text(value: Any) -> str:
     if isinstance(value, dict):
         return " ".join(str(v) for v in value.values())
@@ -46,12 +52,19 @@ def value_text(value: Any) -> str:
 
 
 def supports(field_path: str, value: Any, text: str) -> bool:
-    """An excerpt/answer supports a value if they share a content-word stem. Observed brand
-    patterns (tone, writing style) are exempt: their evidence is an illustrative passage."""
+    """An excerpt/answer supports a value if they share a content-word stem. A value made
+    only of short tokens (acronyms: "CEO", "CIO") is compared token for token against every
+    token of the text instead; a value with no tokens at all cannot be verified and is never
+    supported. Observed brand patterns (tone, writing style) are exempt: their evidence is
+    an illustrative passage."""
     if base_of(field_path) in OBSERVATION_PATHS:
         return True
-    vt = content_stems(value_text(value))
-    return not vt or bool(vt & content_stems(text))
+    vtext = value_text(value)
+    stems = content_stems(vtext)
+    if stems:
+        return bool(stems & content_stems(text))
+    short = short_tokens(vtext)
+    return bool(short) and bool(short & set(tokenize(text)))
 
 
 def unsupported_by_answer(field_path: str, value: Any, answer: str) -> list[str]:

@@ -19,6 +19,7 @@ from profile_builder.logging_setup import configure_console, read_events
 from profile_builder.models import MODEL_TIERS
 from profile_builder.security import SecurityError, safe_child, safe_text, validate_run_id
 from profile_builder.state.run_store import RunStore
+from profile_builder.workflow.export import recover_interrupted_publish
 
 app = typer.Typer(
     name="profile-builder",
@@ -191,6 +192,7 @@ def status(
     """Show stage, status, counters, pending question, warnings and cost for a run."""
     settings = _settings(runs_dir=runs_dir)
     store = _open_store(settings, run_id)
+    recover_interrupted_publish(store.run_dir)  # a killed publish is repaired before reading
     run = store.get_run()
     usage = store.usage_totals()
     t = Table.grid(padding=(0, 2))
@@ -308,6 +310,7 @@ def inspect(
 
     settings = _settings(runs_dir=runs_dir)
     store = _open_store(settings, run_id)
+    recover_interrupted_publish(store.run_dir)
     latest = store.latest_draft()
     if latest is None:
         console.print("No draft saved yet for this run.")
@@ -363,7 +366,9 @@ def export(
 ) -> None:
     """Re-export company_brain.json / evidence.json / report.md from the latest saved draft."""
     settings = _settings(runs_dir=runs_dir)
-    _open_store(settings, run_id).close()
+    store = _open_store(settings, run_id)
+    recover_interrupted_publish(store.run_dir)
+    store.close()
     runner = _runner(settings)
     outcome = runner.export(run_id)
     if outcome.message:

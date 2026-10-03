@@ -250,17 +250,21 @@ class FetchOutcome:
     page: ScrapedPage | None = None
     result: dict[str, Any] | None = None  # the row to report when the fetch failed
     transient: TransientScrapeError | None = None
+    permanent: PermanentScrapeError | None = None
 
 
-def fetch_live(ctx: ToolContext, url: str, *, pace: bool) -> FetchOutcome:
+def fetch_live(ctx: ToolContext, url: str, *, pace: bool, with_links: bool = False) -> FetchOutcome:
     """One counted live fetch. Failures are recorded on the page row and returned as a
     result row; a transient failure is also handed back so the caller can re-raise it once
-    the rest of the batch is done (the retry middleware then retries the call)."""
+    the rest of the batch is done (the retry middleware then retries the call). Discovery
+    asks for the page's links too (`with_links`) so they can seed the candidate list."""
     if pace and SCRAPE_INTER_REQUEST_DELAY_S > 0:
         time.sleep(SCRAPE_INTER_REQUEST_DELAY_S)
     ctx.store.increment_counter("scrape_attempts")
     try:
-        page = ctx.scraper.scrape(url, timeout_ms=ctx.settings.scrape_timeout_ms)
+        page = ctx.scraper.scrape(
+            url, timeout_ms=ctx.settings.scrape_timeout_ms, with_links=with_links
+        )
     except TransientScrapeError as exc:
         err = redact_text(str(exc))
         record_unusable_page(ctx, url, status="failed", error_code=exc.code, error=err)
@@ -289,6 +293,7 @@ def fetch_live(ctx: ToolContext, url: str, *, pace: bool) -> FetchOutcome:
         )
         ctx.warn(f"PAGE_SKIPPED_{exc.code}", f"{url} skipped: {err}")
         return FetchOutcome(
-            result={"url": url, "status": "failed", "error": err, "error_code": exc.code}
+            result={"url": url, "status": "failed", "error": err, "error_code": exc.code},
+            permanent=exc,
         )
     return FetchOutcome(page=page)

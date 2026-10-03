@@ -62,6 +62,7 @@ from profile_builder.web.scraper import (
     Scraper,
 )
 from profile_builder.web.url_guard import URLGuardError, validate_url
+from profile_builder.workflow.export import recover_interrupted_publish
 from profile_builder.workflow.summary import render_question, render_summary
 
 log = get_logger("runner")
@@ -181,6 +182,7 @@ class Runner:
         run_dir.mkdir(parents=True, exist_ok=False)
         run_dir.chmod(0o700)
         self._attach_logging(run_id, run_dir)
+        recover_interrupted_publish(run_dir)
         store = RunStore(run_dir)
         store.create_run(run_id, start_url, product, self.settings.snapshot())
         event(log, "run_started", f"run {run_id} started for {start_url}", kind="start")
@@ -202,6 +204,7 @@ class Runner:
             )
         self.settings = settings
         self._attach_logging(run_id, run_dir)
+        recover_interrupted_publish(run_dir)
         event(
             log,
             "run_started",
@@ -266,6 +269,7 @@ class Runner:
         finished (paused / interrupted / running) keeps its status so `resume` still works."""
         run_dir, store, run = self._open_existing_run(run_id)
         self._attach_logging(run_id, run_dir)
+        recover_interrupted_publish(run_dir)
         ctx = self._context(
             run_id,
             run_dir,

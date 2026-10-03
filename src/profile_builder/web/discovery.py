@@ -1,5 +1,6 @@
 """Page discovery: sitemap/map first, homepage links as fallback, then deterministic
-filtering and heuristic scoring. The agent chooses from the scored candidates."""
+filtering and heuristic scoring. The agent chooses from the scored candidates. The homepage
+itself is fetched (and counted) by `discover_pages`; this module never fetches."""
 
 from __future__ import annotations
 
@@ -124,34 +125,25 @@ def discover(
     check_dns: bool = True,
     max_candidates: int = MAX_CANDIDATES_TO_MODEL,
     homepage: ScrapedPage | None = None,
-    fetch_homepage: bool = True,
+    homepage_error: PermanentScrapeError | None = None,
+    use_map: bool = True,
 ) -> DiscoveryResult:
-    """Transient errors propagate (so the retry middleware can retry); permanent map
-    failures fall back to homepage links, and a permanent homepage failure (404/403/402) is
-    reported in `homepage_error` while the map candidates are still returned. With
-    `fetch_homepage=False` (page budget exhausted) and no cached `homepage`, nothing is
-    fetched and the candidates come from the site map alone."""
+    """Discovery never fetches a page itself: the caller hands in the homepage (fresh or
+    cached, already counted against the budgets) or the permanent error that made it
+    unavailable, and `discover` consults the site map. Transient map errors propagate (the
+    retry middleware retries the tool call, which then serves the homepage from the cache);
+    permanent map failures fall back to the homepage links. With `use_map=False` the map is
+    not consulted at all and the candidates come from the homepage links alone."""
     notes: list[str] = []
     raw: list[LinkCandidate] = []
     source = "none"
-    homepage_error: PermanentScrapeError | None = None
-    # Start from the homepage when allowed: it is the best single page about positioning
-    # and its links supplement (or replace) the site map. Transient errors propagate for
-    # retry. The homepage is the only page discovery ever fetches.
-    if homepage is None and fetch_homepage:
+    if use_map:
         try:
-            homepage = scraper.scrape(start_url, timeout_ms=timeout_ms, with_links=True)
+            raw = list(scraper.map(start_url, limit=DISCOVERY_MAP_LIMIT, timeout_ms=timeout_ms))
+            if raw:
+                source = "map"
         except PermanentScrapeError as exc:
-            homepage_error = exc
-            notes.append(f"homepage unavailable ({exc.code}); relying on the site map")
-    elif homepage is None:
-        notes.append("homepage not fetched (page budget exhausted); using the site map only")
-    try:
-        raw = list(scraper.map(start_url, limit=DISCOVERY_MAP_LIMIT, timeout_ms=timeout_ms))
-        if raw:
-            source = "map"
-    except PermanentScrapeError as exc:
-        notes.append(f"site map unavailable ({exc.code}); using homepage links")
+            notes.append(f"site map unavailable ({exc.code}); using homepage links")
     known = {_safe_normalize(c.url) for c in raw if c.url} - {None}
     homepage_links = [
         LinkCandidate(url=u)
