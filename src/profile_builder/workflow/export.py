@@ -3,11 +3,14 @@ else: sources, questions, warnings, conflicts, usage) and report.md (human summa
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shutil
 import tempfile
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +18,7 @@ from profile_builder.config import (
     APP_VERSION,
     EVIDENCE_FILENAME,
     OUTPUT_FILENAME,
+    PUBLISH_LOCK_FILENAME,
     REPORT_FILENAME,
 )
 from profile_builder.logging_setup import event, get_logger
@@ -189,6 +193,45 @@ def _stage(target: Path, text: str, mode: int) -> Path:
 PUBLISH_JOURNAL_FILENAME = ".publish-journal.json"
 
 
+@contextmanager
+def _publish_lock(run_dir: Path, *, blocking: bool) -> Iterator[bool]:
+    """Per-run advisory lock (``fcntl.flock`` on ``.publish.lock``) serializing a publish with
+    the recovery run by every other command. Yields True once the lock is held; with
+    ``blocking=False`` it yields False at once when another process holds it.
+
+    The holder removes the lock file *before* releasing the lock, so a clean run directory
+    holds nothing but the outputs. That removal is race-free because an acquirer checks, once
+    it holds the lock, that the file it locked is still the one at the path (same inode) and
+    otherwise closes it and locks the freshly created file instead: two processes can never
+    both hold "the" lock on different inodes. A lock file left by a killed process has no
+    holder (the kernel released it) and is simply taken over."""
+    path = run_dir / PUBLISH_LOCK_FILENAME
+    flags = fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB)
+    while True:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, flags)
+        except BlockingIOError:
+            os.close(fd)
+            yield False
+            return
+        except BaseException:
+            os.close(fd)
+            raise
+        try:
+            current = os.fstat(fd).st_ino == os.stat(path).st_ino
+        except FileNotFoundError:
+            current = False
+        if current:
+            break
+        os.close(fd)  # the previous holder removed this file as it released: retry
+    try:
+        yield True
+    finally:
+        _unlink_quietly(path)
+        os.close(fd)  # releases the flock
+
+
 def _journal_paths(base: Path, entry: dict[str, Any]) -> tuple[Path, Path | None, Path | None]:
     """(target, backup, staged) of one journal entry, confined to the run directory."""
     base = base.resolve()
@@ -226,73 +269,99 @@ def write_all_or_nothing(artifacts: list[tuple[Path, str, int]], *, journal: Pat
     """Publish several files as one set: every artifact is staged to a temp file first, then
     renamed into place in sequence (each rename is atomic on its own). Before the first
     rename a publish journal is written next to the outputs listing every target with its
-    backup copy (``null`` when the file did not exist); it is deleted only after the last
-    rename, so the publish is committed exactly when the journal disappears.
+    backup copy (``null`` when the file did not exist); removing it after the last rename is
+    the commit step, so the publish is committed exactly when the journal disappears.
 
-    An ordinary exception is rolled back here (previous versions restored from the backups,
-    new files removed) and leaves no journal, temp or backup file behind. A BaseException
-    (Ctrl-C, SystemExit) is treated like a process kill: it propagates at once and the
-    journal lets `recover_interrupted_publish` repair the set on the next command."""
+    The whole sequence runs under the per-run publish lock, so `recover_interrupted_publish`
+    in a concurrent command never mistakes a publish in progress for an abandoned one.
+
+    An ordinary exception anywhere before the commit (staging, backing up, renaming, or
+    removing the journal) is rolled back here (previous versions restored from the backups,
+    new files removed) and re-raised, leaving no journal, temp or backup file behind. A
+    BaseException (Ctrl-C, SystemExit) is treated like a process kill: it propagates at once
+    and the journal lets `recover_interrupted_publish` repair the set on the next command."""
     base = journal.parent
+    base.mkdir(parents=True, exist_ok=True)
     staged: list[Path] = []
     entries: list[dict[str, Any]] = []
-    try:
-        for target, text, mode in artifacts:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            tmp = _stage(target, text, mode)
-            staged.append(tmp)
-            backup: Path | None = None
-            if target.exists():
-                fd, name = tempfile.mkstemp(prefix=".tmp-bak-", dir=str(target.parent))
-                os.close(fd)
-                backup = Path(name)
-                shutil.copy2(target, backup)
-            entries.append(
-                {
-                    "target": os.path.relpath(target, base),
-                    "backup": os.path.relpath(backup, base) if backup is not None else None,
-                    "staged": os.path.relpath(tmp, base),
-                }
-            )
-        atomic_write_text(journal, json.dumps({"version": 1, "targets": entries}, indent=2) + "\n")
-        renamed = 0
-        for (target, _text, _mode), tmp in zip(artifacts, staged, strict=True):
-            os.replace(tmp, target)
-            renamed += 1
-    except Exception:
-        # Only the targets actually renamed are put back; the others are untouched, so
-        # their backups and temp files are simply discarded.
-        _undo_publish(base, entries[:renamed])
-        for entry in entries[renamed:]:
+    renamed = 0  # before the try: an early failure must still reach the cleanup below
+    with _publish_lock(base, blocking=True):
+        try:
+            for target, text, mode in artifacts:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                tmp = _stage(target, text, mode)
+                staged.append(tmp)
+                backup: Path | None = None
+                if target.exists():
+                    fd, name = tempfile.mkstemp(prefix=".tmp-bak-", dir=str(target.parent))
+                    os.close(fd)
+                    backup = Path(name)
+                # Registered before the copy so a failing copy2 still gets its backup file
+                # removed by the cleanup below (nothing is renamed yet, so nothing is undone).
+                entries.append(
+                    {
+                        "target": os.path.relpath(target, base),
+                        "backup": os.path.relpath(backup, base) if backup is not None else None,
+                        "staged": os.path.relpath(tmp, base),
+                    }
+                )
+                if backup is not None:
+                    shutil.copy2(target, backup)
+            record = {
+                "version": 1,
+                "pid": os.getpid(),
+                "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "targets": entries,
+            }
+            atomic_write_text(journal, json.dumps(record, indent=2) + "\n")
+            for (target, _text, _mode), tmp in zip(artifacts, staged, strict=True):
+                os.replace(tmp, target)
+                renamed += 1
+            journal.unlink()  # the commit: a failure here rolls back like any other
+        except Exception:
+            # Only the targets actually renamed are put back; the others are untouched, so
+            # their backups and temp files are simply discarded.
+            _undo_publish(base, entries[:renamed])
+            for entry in entries[renamed:]:
+                if entry["backup"]:
+                    _unlink_quietly(base / entry["backup"])
+            for tmp in staged:
+                _unlink_quietly(tmp)
+            _unlink_quietly(journal)
+            raise
+        # committed: from here on a kill leaves at most stray backups
+        for entry in entries:
             if entry["backup"]:
                 _unlink_quietly(base / entry["backup"])
-        for tmp in staged:
-            _unlink_quietly(tmp)
-        _unlink_quietly(journal)
-        raise
-    _unlink_quietly(journal)  # committed: from here on a kill leaves at most stray backups
-    for entry in entries:
-        if entry["backup"]:
-            _unlink_quietly(base / entry["backup"])
 
 
 def recover_interrupted_publish(run_dir: Path) -> bool:
     """Repair outputs left half-published by a process killed between renames: every target
     listed in the publish journal is restored from its backup (or removed when it did not
     exist before), then the journal is deleted. Idempotent and silent when there is no
-    journal; returns True (and logs `publish_recovered`) when a journal was processed."""
+    journal; returns True (and logs `publish_recovered`) when a journal was processed.
+
+    A journal whose publisher is still running (it holds the per-run publish lock) is not
+    abandoned: nothing is touched and False is returned; the publisher commits or rolls back
+    on its own."""
     journal = run_dir / PUBLISH_JOURNAL_FILENAME
     if not journal.exists():
         return False
-    entries: list[dict[str, Any]] = []
-    try:
-        data = json.loads(journal.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            entries = [e for e in (data.get("targets") or []) if isinstance(e, dict)]
-    except (OSError, ValueError):
-        log.warning("publish journal %s is unreadable; removing it", journal)
-    restored = _undo_publish(run_dir, entries)
-    _unlink_quietly(journal)
+    with _publish_lock(run_dir, blocking=False) as held:
+        if not held:
+            log.debug("publish journal %s belongs to a publish in progress; left alone", journal)
+            return False
+        if not journal.exists():  # the publisher committed while we were acquiring the lock
+            return False
+        entries: list[dict[str, Any]] = []
+        try:
+            data = json.loads(journal.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                entries = [e for e in (data.get("targets") or []) if isinstance(e, dict)]
+        except (OSError, ValueError):
+            log.warning("publish journal %s is unreadable; removing it", journal)
+        restored = _undo_publish(run_dir, entries)
+        _unlink_quietly(journal)
     event(
         log,
         "publish_recovered",

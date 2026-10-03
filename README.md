@@ -35,12 +35,12 @@ Check your configuration and provider connectivity:
 uv run python -m profile_builder doctor
 ```
 
-Start a profile for Fortanix's Confidential Computing Platform:
+Start a profile for your company (replace the example URL and product name):
 
 ```bash
 uv run python -m profile_builder start \
-  --url https://www.fortanix.com/ \
-  --product "Confidential Computing Platform"
+  --url https://www.example.com/ \
+  --product "Your Product"
 ```
 
 The terminal shows progress, prints a run ID, and waits for your answers when needed.
@@ -127,10 +127,10 @@ uv run python -m profile_builder inspect \
   --run-id "$RUN_ID" --field customer.target_customer
 ```
 
-For a saved Fortanix example, open the [profile](examples/fortanix/company_brain.json),
+For a saved example, open the [profile](examples/fortanix/company_brain.json),
 [evidence](examples/fortanix/evidence.json), [report](examples/fortanix/report.md), or
 [terminal transcript](examples/fortanix/transcript.txt). The example's interview answers
-were supplied by the candidate as a proxy, rather than confirmed by Fortanix.
+were supplied by the candidate as a proxy, rather than confirmed by the company.
 
 ## Useful commands and settings
 
@@ -203,13 +203,13 @@ The tests use a scripted model and saved website fixtures, so they run offline w
 API keys. They cover the profile contract, evidence handling, corrections, limits,
 provider failures, and interruption/resume behavior.
 
-To try the CLI with saved Fortanix pages:
+To try the CLI with your own saved pages:
 
 ```bash
 uv run python -m profile_builder start \
-  --url https://www.fortanix.com/ \
-  --product "Confidential Computing Platform" \
-  --fixtures tests/fixtures/fortanix
+  --url https://www.example.com/ \
+  --product "Your Product" \
+  --fixtures path/to/your/fixtures
 ```
 
 This replaces Firecrawl page fetching with local files. It still needs an OpenAI key and
@@ -243,8 +243,8 @@ mkdir -p .runs
 docker run --rm -it --user "$(id -u):$(id -g)" \
   --env-file .env -e PROFILE_BUILDER_RUNS_DIR=/runs \
   -v "$PWD/.runs:/runs" \
-  profile-builder start --url https://www.fortanix.com/ \
-  --product "Confidential Computing Platform"
+  profile-builder start --url https://www.example.com/ \
+  --product "Your Product"
 ```
 
 The mounted directory keeps progress after the container exits. Use the same mount and

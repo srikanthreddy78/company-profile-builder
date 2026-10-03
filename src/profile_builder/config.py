@@ -133,6 +133,7 @@ DISCOVERY_FILENAME = "discovery.json"
 OUTPUT_FILENAME = "company_brain.json"
 EVIDENCE_FILENAME = "evidence.json"
 REPORT_FILENAME = "report.md"
+PUBLISH_LOCK_FILENAME = ".publish.lock"  # per-run flock serializing publish and recovery
 
 RUN_ID_PREFIX = "pb"
 RUN_ID_PATTERN = r"^pb-\d{8}-[a-z0-9]{6}$"

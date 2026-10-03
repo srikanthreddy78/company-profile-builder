@@ -138,10 +138,12 @@ then opens one SQLite transaction in which the warnings, conflict statuses, evid
 A validation failure leaves the store untouched; a failed write rolls everything back; a
 re-export recomputes the same omissions from the same state. The three output files are
 published as one set: each file is replaced atomically (staged to a temp file, then renamed),
-the set is published in sequence, a failure restores the previous set, and a process kill
-between renames is repaired from the publish journal (`.publish-journal.json`) on the next
-`start` / `resume` / `export` / `status` / `inspect`, so readers may observe a half-published
-set only in that window.
+the set is published in sequence under a per-run publish lock (`.publish.lock`, `fcntl.flock`)
+that also serializes recovery, removing the publish journal is the commit step (a failure there
+rolls back like any other), a failure restores the previous set, and a process kill between
+renames is repaired from the publish journal (`.publish-journal.json`) on the next `start` /
+`resume` / `export` / `status` / `inspect` (skipped while the publisher still holds the lock),
+so readers may observe a half-published set only in that window.
 
 ## Run lifecycle and statuses
 
