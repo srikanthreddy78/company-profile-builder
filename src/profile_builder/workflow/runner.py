@@ -179,7 +179,7 @@ class Runner:
             start_url = validate_url(url, check_dns=self.check_dns)
         except URLGuardError as exc:
             raise ValueError(f"URL rejected: {exc}") from exc
-        # Fail on missing provider credentials before anything is written to disk.
+        # Credentials and fixtures are checked before anything is written to disk.
         scraper = self.scraper_factory(self.settings)
         model = self.model_factory(self.settings)
         run_id = new_run_id()
