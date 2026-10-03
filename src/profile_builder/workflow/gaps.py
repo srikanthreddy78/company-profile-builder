@@ -8,8 +8,10 @@ from typing import Any
 
 from profile_builder.schema import (
     FEATURE_LIST_PATH,
+    MERGEABLE_BASES,
     STRING_LIST_PATHS,
     STRING_PATHS,
+    base_of,
     get_by_path,
     iter_leaf_paths,
     parse_field_path,
@@ -143,7 +145,7 @@ def grounding_report(profile: dict[str, Any], evidence_paths: set[str]) -> dict[
 def section_coverage(profile: dict[str, Any]) -> dict[str, tuple[int, int]]:
     """Per top-level section: (filled leaf fields, total leaf fields considered)."""
     out: dict[str, list[int]] = {}
-    for path in (*STRING_PATHS, *STRING_LIST_PATHS, FEATURE_LIST_PATH):
+    for path in MERGEABLE_BASES:
         section = path.split(".", 1)[0]
         filled, total = out.setdefault(section, [0, 0])
         total += 1
@@ -171,7 +173,7 @@ def prioritize_for_interview(
             Gap(c["field_path"], 110, f"conflicting evidence: {c.get('summary') or ''}", "conflict")
         )
     for g in empty_gaps(profile):
-        if g.field_path in asked_paths or g.field_path.split("[")[0] in asked_paths:
+        if g.field_path in asked_paths or base_of(g.field_path) in asked_paths:
             continue
         items.append(g)
     for p in ungrounded[:5]:

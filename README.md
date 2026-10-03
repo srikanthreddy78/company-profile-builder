@@ -249,7 +249,10 @@ src/profile_builder/
   web/url_guard.py       SSRF guard                web/robots.py    robots.txt
   web/scraper.py         Firecrawl + fixtures      web/discovery.py candidate discovery + scoring
   retrieval/chunking.py  heading-aware chunks      retrieval/index.py  BM25 + embeddings + RRF
-  agent/tools.py         the 9 tools               agent/middleware.py middleware stack
+  agent/tools/           the 9 tools (web, interview, draft groups)   agent/middleware.py middleware stack
+  agent/context.py       ToolContext + fatal error  agent/ingest.py     page caching/chunking/indexing
+  agent/evidence.py      evidence verification      agent/drafting.py   validate/merge/repair drafts
+  agent/interview.py     question ids + answers     agent/finalize.py   omission + atomic export
   agent/prompts.py       system prompt             agent/builder.py  model/checkpointer/agent
   state/run_store.py     SQLite run state          workflow/runner.py start/resume/interview loop
   workflow/gaps.py       gap + grounding analysis  workflow/export.py / summary.py  outputs + terminal UI

@@ -21,6 +21,16 @@ from profile_builder.web.url_guard import normalize_url
 log = get_logger("scraper")
 
 
+TRANSIENT_CODES = frozenset(
+    {"RATE_LIMITED", "TIMEOUT", "SERVER_ERROR", "NETWORK", "TRANSIENT", "HTTP_429", "HTTP_408"}
+)
+
+
+def is_transient_code(code: str | None) -> bool:
+    """True for error codes a later attempt may clear (the page did not consume a scrape)."""
+    return bool(code) and (code in TRANSIENT_CODES or code.startswith("HTTP_5"))
+
+
 class TransientScrapeError(Exception):
     """Retryable: rate limit, timeout, 5xx, network blip."""
 
@@ -159,9 +169,6 @@ class FirecrawlScraper:
             raise PermanentScrapeError(
                 f"target returned HTTP {status}", code=f"HTTP_{status}", http_status=int(status)
             )
-        # Firecrawl: `metadata.url` is where the engine actually ended up (after redirects);
-        # `metadata.source_url` is only the URL we asked for. process_page re-checks the final
-        # URL against the SSRF guard and the same-site rule.
         # Firecrawl: `metadata.url` is where the engine actually ended up (after redirects);
         # `metadata.source_url` is only the URL we asked for. process_page re-checks the final
         # URL against the SSRF guard and the same-site rule.

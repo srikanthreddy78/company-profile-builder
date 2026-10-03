@@ -186,12 +186,19 @@ STRING_LIST_PATHS: tuple[str, ...] = (
 )
 FEATURE_LIST_PATH = "product.features_and_capabilities"
 FEATURE_FIELDS: tuple[str, ...] = ("name", "description", "how_it_works", "customer_benefit")
+# Every top-level field a draft can carry over from an earlier one (strings, lists, features).
+MERGEABLE_BASES: tuple[str, ...] = (*STRING_PATHS, *STRING_LIST_PATHS, FEATURE_LIST_PATH)
 
 _PATH_RE = re.compile(r"^(?P<base>[a-z_]+\.[a-z_]+)(?:\[(?P<idx>\d+)\])?(?:\.(?P<sub>[a-z_]+))?$")
 
 
 class FieldPathError(ValueError):
     pass
+
+
+def base_of(path: str) -> str:
+    """The top-level field of a path: ``customer.buyers[2]`` → ``customer.buyers``."""
+    return path.split("[")[0]
 
 
 def parse_field_path(path: str) -> tuple[str, int | None, str | None]:

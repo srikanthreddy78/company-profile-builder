@@ -125,3 +125,38 @@ def render_resume_message() -> str:
         "The run was resumed from its last checkpoint. Continue from where you left off; "
         "do not repeat completed work or re-ask answered questions."
     )
+
+
+# --------------------------------------------------------------------------------------
+# Tool-result hints (model-facing text returned inside tool payloads)
+# --------------------------------------------------------------------------------------
+
+_THIN_SECTION_HINTS = {
+    "product": '"what the platform does", "key features and capabilities", "how it works", "why choose / differentiators"',
+    "customer": '"who it is for", "industries and use cases", "challenges / problems solved", "outcomes and benefits", "compared to / alternatives"',
+    "content_evidence": '"case study results", "customers like", "awards, research, certifications", "demo, benchmarks, proof"',
+    "brand": '"tone of voice and recurring phrases" (read 2-3 page leads with read_page)',
+}
+
+
+def thin_section_hint(section: str) -> str:
+    """Search topics the model should try for a section the draft left nearly empty."""
+    return _THIN_SECTION_HINTS.get(section, "the relevant topics")
+
+
+def render_thin_draft_advice(thin: list[str], pages_indexed: int) -> str:
+    lines = [f"- {sec}: search_pages for {thin_section_hint(sec)}" for sec in thin]
+    return (
+        f"The draft leaves {len(thin)} section(s) nearly empty although {pages_indexed} pages are indexed. "
+        "Do NOT ask the user about facts the website can answer. First gather evidence, then fill these via apply_profile_updates:\n"
+        + "\n".join(lines)
+    )
+
+
+def ungrounded_hint() -> str:
+    return (
+        "these populated fields have no accepted evidence and will be "
+        "OMITTED from the export unless you cite a verbatim page excerpt "
+        "(apply_profile_updates with kind=website) or an answered question. "
+        "Call finalize_profile again when done."
+    )

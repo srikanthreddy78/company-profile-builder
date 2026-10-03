@@ -9,7 +9,7 @@ limits, caching, retries, validation, evidence, persistence.
 CLI (typer + rich)
   └─ Runner (workflow/runner.py) ── start / resume / export, interview loop, limit detection
        └─ create_deep_agent(model, tools, middleware, checkpointer=SqliteSaver)
-            ├─ tools (agent/tools.py)      discover_pages · scrape_pages · search_pages · read_page
+            ├─ tools (agent/tools/)        discover_pages · scrape_pages · search_pages · read_page
             │                              ask_user (interrupt) · save_profile_draft
             │                              apply_profile_updates · note_conflict · finalize_profile
             ├─ middleware (agent/middleware.py)  see table below
@@ -164,7 +164,7 @@ re-export recomputes the same omissions from the same state.
 
 ## Warning codes and tool result codes
 
-Warnings (in `evidence.json`, `report.md`, `status`), from `agent/tools.py`,
+Warnings (in `evidence.json`, `report.md`, `status`), from `agent/tools/`, `agent/ingest.py`, `agent/finalize.py`,
 `workflow/runner.py` and `agent/middleware.py`:
 
 | Code | Meaning |

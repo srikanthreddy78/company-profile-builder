@@ -97,20 +97,29 @@ CHUNK_TOKENS = 400
 CHUNK_OVERLAP_TOKENS = 60
 CHARS_PER_TOKEN = 4  # cheap estimate; exactness is not needed for chunk sizing
 SEARCH_K = 6
+MIN_PAGE_CHARS = 80  # shorter pages carry no usable text and are skipped
 MAX_EXCERPT_CHARS = 500
-MIN_EXCERPT_CHARS = 25
-THIN_DRAFT_SECTION_FIELDS = 1  # a section with <= this many filled fields counts as thin  # shorter "quotes" cannot ground a claim
+MIN_EXCERPT_CHARS = 25  # shorter "quotes" cannot ground a claim
 MAX_EVIDENCE_EXCERPT_CHARS = 2 * MAX_EXCERPT_CHARS
 MAX_READ_CHARS = 4000
 PAGE_LEAD_CHARS = 300
+PAGE_LEAD_SLICE_FACTOR = 2  # whitespace-normalize this many lead chars before trimming
 PAGE_HEADINGS_TO_MODEL = 10
 RRF_K = 60  # reciprocal-rank-fusion constant
 MAX_ANSWER_CHARS = 2000
+
+# Evidence grounding -------------------------------------------------------------------
+STEM_CHARS = 5  # content words are compared on this prefix so inflections still overlap
+MIN_CONTENT_TOKEN_CHARS = 4  # shorter tokens are stop-word noise, not content
+OBSERVATION_PATHS = frozenset({"brand.voice_and_tone", "brand.writing_style"})
+THIN_DRAFT_SECTION_FIELDS = 1  # a section with <= this many filled fields counts as thin
 
 # Interview / validation ---------------------------------------------------------------
 MAX_REPAIR_ATTEMPTS = 1
 MAX_FINALIZE_NUDGES = 1
 MAX_FINALIZE_REFUSALS = 1  # finalize_profile pushes back once if sections are empty
+FINALIZE_GUARD_SECTIONS = frozenset({"product", "customer", "content_evidence"})
+MAX_QUESTION_MARKS = 2  # a question plus one clarifying sub-question is fine; a list is not
 
 # Logging ------------------------------------------------------------------------------
 EVENTS_FILENAME = "events.jsonl"

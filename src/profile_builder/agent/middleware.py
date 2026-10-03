@@ -7,6 +7,7 @@ middleware so every attempt is logged and charged.
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -79,6 +80,10 @@ def is_retryable_model_error(exc: BaseException) -> bool:
     return not is_provider_rejection(exc)
 
 
+def _elapsed_ms(t0: float) -> int:
+    return int((time.perf_counter() - t0) * 1000)
+
+
 class RunTelemetryMiddleware(AgentMiddleware):
     """Logs every model/tool attempt with duration, tokens and cost; records usage in the
     RunStore. Never converts errors and never swallows control-flow interrupts."""
@@ -107,9 +112,9 @@ class RunTelemetryMiddleware(AgentMiddleware):
                 log,
                 "model_call",
                 f"model call failed: {type(exc).__name__}: {str(exc)[:200]}",
-                level=30,
+                level=logging.WARNING,
                 attempt=attempt,
-                duration_ms=int((time.perf_counter() - t0) * 1000),
+                duration_ms=_elapsed_ms(t0),
                 status=status,
                 model=self.model_id,
             )
@@ -131,7 +136,7 @@ class RunTelemetryMiddleware(AgentMiddleware):
             "model_call",
             "model call ok",
             attempt=attempt,
-            duration_ms=int((time.perf_counter() - t0) * 1000),
+            duration_ms=_elapsed_ms(t0),
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             cost_usd=round(cost, 6),
@@ -146,41 +151,31 @@ class RunTelemetryMiddleware(AgentMiddleware):
         attempt = self._tool_attempts.get(call_id, 0) + 1
         self._tool_attempts[call_id] = attempt
         t0 = time.perf_counter()
+
+        def tool_event(message: str, status: str, level: int = logging.INFO) -> None:
+            event(
+                log,
+                "tool_call",
+                message,
+                level=level,
+                attempt=attempt,
+                duration_ms=_elapsed_ms(t0),
+                tool=name,
+                status=status,
+            )
+
         try:
             result = handler(request)
         except GraphBubbleUp:
-            event(
-                log,
-                "tool_call",
-                f"{name} paused for user input",
-                attempt=attempt,
-                duration_ms=int((time.perf_counter() - t0) * 1000),
-                tool=name,
-                status="interrupted",
-            )
+            tool_event(f"{name} paused for user input", "interrupted")
             raise
         except Exception as exc:
-            event(
-                log,
-                "tool_call",
-                f"{name} raised {type(exc).__name__}: {str(exc)[:200]}",
-                level=30,
-                attempt=attempt,
-                duration_ms=int((time.perf_counter() - t0) * 1000),
-                tool=name,
-                status="error",
+            tool_event(
+                f"{name} raised {type(exc).__name__}: {str(exc)[:200]}", "error", logging.WARNING
             )
             raise
         status = getattr(result, "status", "ok") if isinstance(result, ToolMessage) else "ok"
-        event(
-            log,
-            "tool_call",
-            f"{name} finished",
-            attempt=attempt,
-            duration_ms=int((time.perf_counter() - t0) * 1000),
-            tool=name,
-            status=status or "ok",
-        )
+        tool_event(f"{name} finished", status or "ok")
         return result
 
 
@@ -212,7 +207,14 @@ class BudgetCapMiddleware(AgentMiddleware):
         self.store.add_warning(
             "BUDGET_EXCEEDED", message, {"spent_usd": spent, "budget_usd": self.budget_usd}
         )
-        event(log, "limit_reached", message, level=30, kind="budget", cost_usd=round(spent, 6))
+        event(
+            log,
+            "limit_reached",
+            message,
+            level=logging.WARNING,
+            kind="budget",
+            cost_usd=round(spent, 6),
+        )
         return {"jump_to": "end", "messages": [AIMessage(content=message)]}
 
 

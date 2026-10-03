@@ -15,9 +15,11 @@ import pytest
 import requests
 from langchain_core.messages import AIMessage, ToolMessage
 
-import profile_builder.agent.tools as tools_mod
+import profile_builder.agent.finalize as finalize_mod
+import profile_builder.agent.ingest as ingest_mod
+import profile_builder.agent.tools.web_tools as web_tools_mod
 import profile_builder.config as config_mod
-from profile_builder.agent.tools import _omit_many
+from profile_builder.agent.finalize import omit_many
 from profile_builder.retrieval.index import HybridIndex
 from profile_builder.schema import json_schema
 from profile_builder.security import url_cache_name
@@ -522,7 +524,7 @@ def test_F5_two_open_conflicts_same_list_finalize_cleanly(settings, acme_fixture
 
 
 def test_F5b_failed_output_write_rolls_the_store_back(settings, acme_fixtures, monkeypatch):
-    real_write = tools_mod.write_outputs
+    real_write = finalize_mod.write_outputs
     calls = {"n": 0}
 
     def flaky_write(*args, **kwargs):
@@ -531,7 +533,7 @@ def test_F5b_failed_output_write_rolls_the_store_back(settings, acme_fixtures, m
             raise OSError("disk full")
         return real_write(*args, **kwargs)
 
-    monkeypatch.setattr(tools_mod, "write_outputs", flaky_write)
+    monkeypatch.setattr(finalize_mod, "write_outputs", flaky_write)
     runner, _, _ = make_runner(
         settings, _two_conflicts_steps(), scraper=FixtureScraper(acme_fixtures)
     )
@@ -927,7 +929,7 @@ def test_F10_omit_many_is_order_independent(tmp_path):
             "how_it_works": "ghost how",
             "customer_benefit": "ghost benefit",
         }
-        shifts = _omit_many(store, data, order)
+        shifts = omit_many(store, data, order)
         feats = data["product"]["features_and_capabilities"]
         assert (
             len(feats) == 1 and feats[0] == DRAFT_PROFILE["product"]["features_and_capabilities"][1]
@@ -936,14 +938,14 @@ def test_F10_omit_many_is_order_independent(tmp_path):
     # sub-field blanking happens before deletion; items go highest index first
     data = copy.deepcopy(DRAFT_PROFILE)
     data["customer"]["buyers"] = ["a", "b", "c"]
-    shifts = _omit_many(
+    shifts = omit_many(
         None, data, ["customer.buyers[2]", "customer.buyers[0]", f"{base}[1].customer_benefit"]
     )
     assert data["customer"]["buyers"] == ["b"]
     assert data["product"]["features_and_capabilities"][1]["customer_benefit"] == ""
     assert shifts == [("customer.buyers", 2), ("customer.buyers", 0)]
     # whole-field omissions blank strings and lists
-    _omit_many(None, data, ["product.positioning", "customer.use_cases"])
+    omit_many(None, data, ["product.positioning", "customer.use_cases"])
     assert data["product"]["positioning"] == "" and data["customer"]["use_cases"] == []
 
 
@@ -1357,7 +1359,9 @@ def test_G3_all_pages_404_with_interview_exports_partial_interview_only(settings
 
 
 def test_fetch_attempt_budget_and_url_cap(settings, acme_fixtures, monkeypatch):
-    monkeypatch.setattr(tools_mod, "SCRAPE_ATTEMPTS_PER_PAGE", 1)  # cap = max_pages (4) attempts
+    monkeypatch.setattr(
+        web_tools_mod, "SCRAPE_ATTEMPTS_PER_PAGE", 1
+    )  # cap = max_pages (4) attempts
     settings = settings.model_copy(update={"max_retries": 2})
     scraper = FixtureScraper(
         acme_fixtures,
@@ -1400,7 +1404,7 @@ def test_fetch_attempt_budget_and_url_cap(settings, acme_fixtures, monkeypatch):
 def test_private_ip_redirect_empty_and_truncated_pages(
     settings, acme_fixtures_mutable, monkeypatch
 ):
-    monkeypatch.setattr(tools_mod, "MAX_PAGE_CHARS", 400)
+    monkeypatch.setattr(ingest_mod, "MAX_PAGE_CHARS", 400)
     fx = acme_fixtures_mutable
     redirect, empty, long_ = f"{SITE}/go", f"{SITE}/empty", f"{SITE}/long"
     FixtureScraper.write_page(

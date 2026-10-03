@@ -39,6 +39,7 @@ from profile_builder.agent.tools import (
 from profile_builder.config import (
     DISCOVERY_FILENAME,
     MAX_FINALIZE_NUDGES,
+    RUN_DB,
     RUN_ID_PREFIX,
     Settings,
 )
@@ -51,7 +52,7 @@ from profile_builder.logging_setup import (
 )
 from profile_builder.retrieval.index import Embeddings, HashEmbeddings, HybridIndex
 from profile_builder.security import safe_child, safe_text, sanitize_answer, validate_run_id
-from profile_builder.state.run_store import RunStore
+from profile_builder.state.run_store import RunRecord, RunStore
 from profile_builder.web.robots import RobotsChecker
 from profile_builder.web.scraper import (
     FirecrawlScraper,
@@ -98,6 +99,22 @@ def new_run_id() -> str:
     alphabet = string.ascii_lowercase + string.digits
     suffix = "".join(secrets.choice(alphabet) for _ in range(6))
     return f"{RUN_ID_PREFIX}-{time.strftime('%Y%m%d')}-{suffix}"
+
+
+def _initial_input(start_url: str, product: str | None, settings: Settings) -> dict[str, Any]:
+    """The first user message that kicks off (or re-kicks off) the agent."""
+    return {
+        "messages": [
+            HumanMessage(
+                content=render_initial_message(
+                    start_url=start_url,
+                    product_focus=product,
+                    max_pages=settings.max_pages,
+                    max_questions=settings.max_questions,
+                )
+            )
+        ]
+    }
 
 
 def default_scraper_factory(fixtures_dir: Path | None) -> ScraperFactory:
@@ -172,27 +189,10 @@ class Runner:
         self.console.print(
             f"[bold]Run id:[/bold] {run_id}  [dim](resume later with: {self._resume_cmd(run_id)})[/dim]"
         )
-        initial = {
-            "messages": [
-                HumanMessage(
-                    content=render_initial_message(
-                        start_url=start_url,
-                        product_focus=product,
-                        max_pages=self.settings.max_pages,
-                        max_questions=self.settings.max_questions,
-                    )
-                )
-            ]
-        }
-        return self._run(ctx, agent, config, initial)
+        return self._run(ctx, agent, config, _initial_input(start_url, product, self.settings))
 
     def resume(self, run_id: str, **overrides: Any) -> RunOutcome:
-        validate_run_id(run_id)
-        run_dir = safe_child(self.settings.runs_dir, run_id)
-        if not (run_dir / "run.sqlite").exists():
-            raise FileNotFoundError(f"run {run_id} not found under {self.settings.runs_dir}")
-        store = RunStore(run_dir)
-        run = store.get_run()
+        run_dir, store, run = self._open_existing_run(run_id)
         settings = Settings.from_snapshot(run.settings, **overrides)
         clean_overrides = {k: v for k, v in overrides.items() if v is not None}
         if clean_overrides:
@@ -228,10 +228,7 @@ class Runner:
                 return self._paused(ctx)
             return self._run(ctx, agent, config, Command(resume={intr.id: answer}))
         if run.status in FINISHED_STATUSES and not resuming_partial:
-            latest = store.latest_draft()
-            render_summary(
-                self.console, store, latest[1] if latest else None, run.status, run.output_path
-            )
+            render_summary(self.console, store, store.latest_profile(), run.status, run.output_path)
             hint = (
                 " Pass --budget-usd / --max-questions to continue a partial run."
                 if run.status == "partial"
@@ -259,30 +256,15 @@ class Runner:
             }
             return self._run(ctx, agent, config, nudge)
         if not snap.values:
-            initial = {
-                "messages": [
-                    HumanMessage(
-                        content=render_initial_message(
-                            start_url=run.start_url,
-                            product_focus=run.product_focus,
-                            max_pages=settings.max_pages,
-                            max_questions=settings.max_questions,
-                        )
-                    )
-                ]
-            }
-            return self._run(ctx, agent, config, initial)
+            return self._run(
+                ctx, agent, config, _initial_input(run.start_url, run.product_focus, settings)
+            )
         return self._guarded(ctx, lambda: self._finish(ctx, agent, config))
 
     def export(self, run_id: str) -> RunOutcome:
         """Re-export from the latest saved draft without running the agent. A run that is not
         finished (paused / interrupted / running) keeps its status so `resume` still works."""
-        validate_run_id(run_id)
-        run_dir = safe_child(self.settings.runs_dir, run_id)
-        if not (run_dir / "run.sqlite").exists():
-            raise FileNotFoundError(f"run {run_id} not found under {self.settings.runs_dir}")
-        store = RunStore(run_dir)
-        run = store.get_run()
+        run_dir, store, run = self._open_existing_run(run_id)
         self._attach_logging(run_id, run_dir)
         ctx = self._context(
             run_id,
@@ -299,11 +281,8 @@ class Runner:
             summary = finalize(ctx, forced_partial=forced, keep_status=unfinished)
         except FatalProfileError as exc:
             return RunOutcome(run_id, "failed", message=str(exc))
-        latest = store.latest_draft()
         status = run.status if unfinished else summary["status"]
-        render_summary(
-            self.console, store, latest[1] if latest else None, status, summary["output_path"]
-        )
+        render_summary(self.console, store, store.latest_profile(), status, summary["output_path"])
         return RunOutcome(
             run_id,
             status,
@@ -312,6 +291,15 @@ class Runner:
         )
 
     # ---- internals -----------------------------------------------------------------
+    def _open_existing_run(self, run_id: str) -> tuple[Path, RunStore, RunRecord]:
+        """Locate a stored run by id (validated, confined to the runs dir) and open its store."""
+        validate_run_id(run_id)
+        run_dir = safe_child(self.settings.runs_dir, run_id)
+        if not (run_dir / RUN_DB).exists():
+            raise FileNotFoundError(f"run {run_id} not found under {self.settings.runs_dir}")
+        store = RunStore(run_dir)
+        return run_dir, store, store.get_run()
+
     def _attach_logging(self, run_id: str, run_dir: Path) -> None:
         secrets_ = [
             s.get_secret_value()
@@ -399,10 +387,9 @@ class Runner:
     def _paused(self, ctx: ToolContext) -> RunOutcome:
         ctx.store.set_status(PAUSED)
         event(log, "run_finished", "run paused by user during interview", status=PAUSED)
-        latest = ctx.store.latest_draft()
         hint = f"Progress is saved. Continue with:\n  {self._resume_cmd(ctx.run_id)}"
         render_summary(
-            self.console, ctx.store, latest[1] if latest else None, PAUSED, None, resume_hint=hint
+            self.console, ctx.store, ctx.store.latest_profile(), PAUSED, None, resume_hint=hint
         )
         return RunOutcome(ctx.run_id, PAUSED, resume_hint=self._resume_cmd(ctx.run_id))
 
@@ -448,11 +435,10 @@ class Runner:
             hint = (
                 f"The run stopped on an error and can be resumed:\n  {self._resume_cmd(ctx.run_id)}"
             )
-            latest = ctx.store.latest_draft()
             render_summary(
                 self.console,
                 ctx.store,
-                latest[1] if latest else None,
+                ctx.store.latest_profile(),
                 "interrupted",
                 None,
                 resume_hint=hint,
@@ -535,11 +521,10 @@ class Runner:
         resume_hint: str | None = None,
     ) -> RunOutcome:
         self._maybe_save_fixtures(ctx)
-        latest = ctx.store.latest_draft()
         render_summary(
             self.console,
             ctx.store,
-            latest[1] if latest else None,
+            ctx.store.latest_profile(),
             status,
             output_path,
             resume_hint=f"Continue with:\n  {resume_hint}" if resume_hint else None,
@@ -551,10 +536,10 @@ class Runner:
         ctx.store.set_status("failed")
         ctx.store.add_warning("RUN_FAILED", message[:300])
         event(log, "run_finished", f"run failed: {message}", level=logging.ERROR, status="failed")
-        latest = ctx.store.latest_draft()
-        render_summary(self.console, ctx.store, latest[1] if latest else None, "failed", None)
+        latest = ctx.store.latest_profile()
+        render_summary(self.console, ctx.store, latest, "failed", None)
         self.console.print(f"[bold red]Error:[/bold red] {safe_text(message, 500)}")
-        if latest:
+        if latest is not None:
             self.console.print(
                 f"[dim]A valid earlier draft exists; export it with: python -m profile_builder export --run-id {ctx.run_id}[/dim]"
             )

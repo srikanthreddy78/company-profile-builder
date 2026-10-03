@@ -11,13 +11,15 @@ import sqlite3
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from profile_builder.config import RUN_DB
+from profile_builder.schema import base_of
+from profile_builder.web.scraper import TRANSIENT_CODES
 
 SCHEMA_VERSION = 1
 
@@ -151,8 +153,8 @@ class PageRecord:
     cache_file: str | None
     error_code: str | None
     error: str | None
-    selected: bool
-    fetched_at: float | None
+    selected: bool = True
+    fetched_at: float | None = field(default_factory=time.time)
 
 
 @dataclass
@@ -371,11 +373,14 @@ class RunStore:
         """Distinct URLs for which a live scrape returned *something*: successful pages,
         duplicates/empties, off-site redirects and permanent failures. Transient failures,
         robots skips and guard rejections did not consume a scrape."""
+        transient = sorted(TRANSIENT_CODES)
+        placeholders = ",".join("?" for _ in transient)
         row = self._conn.execute(
-            """SELECT COUNT(*) AS n FROM pages WHERE status='fetched'
+            f"""SELECT COUNT(*) AS n FROM pages WHERE status='fetched'
                OR error_code IN ('DUPLICATE_CONTENT','EMPTY_CONTENT','REDIRECT_REJECTED','REDIRECT_OFFSITE')
-               OR (status='failed' AND error_code NOT IN ('RATE_LIMITED','TIMEOUT','SERVER_ERROR','NETWORK','TRANSIENT','HTTP_429','HTTP_408')
-                   AND error_code NOT LIKE 'HTTP_5%')"""
+               OR (status='failed' AND error_code NOT IN ({placeholders})
+                   AND error_code NOT LIKE 'HTTP_5%')""",
+            transient,
         ).fetchone()
         return int(row["n"])
 
@@ -425,7 +430,7 @@ class RunStore:
         rows = self._conn.execute(
             "SELECT DISTINCT field_path FROM evidence WHERE kind='interview' AND superseded=0"
         ).fetchall()
-        return {r["field_path"].split("[")[0] for r in rows}
+        return {base_of(r["field_path"]) for r in rows}
 
     def content_hash_exists(self, content_hash: str, other_than: str) -> str | None:
         row = self._conn.execute(
@@ -506,6 +511,15 @@ class RunStore:
         return out
 
     # ---- evidence ------------------------------------------------------------------
+    @staticmethod
+    def _subtree_clause(field_path: str) -> tuple[str, tuple[str, str, str]]:
+        """SQL predicate (and its params) matching `field_path`, its list items and its
+        feature subfields."""
+        return (
+            "(field_path=? OR field_path LIKE ? OR field_path LIKE ?)",
+            (field_path, field_path + "[%", field_path + ".%"),
+        )
+
     def replace_website_evidence(
         self, rows: list[dict[str, Any]], *, only_fields: set[str] | None = None
     ) -> None:
@@ -515,10 +529,10 @@ class RunStore:
             self._conn.execute("DELETE FROM evidence WHERE kind='website' AND superseded=0")
         else:
             for base in only_fields:
+                clause, params = self._subtree_clause(base)
                 self._conn.execute(
-                    "DELETE FROM evidence WHERE kind='website' AND superseded=0 AND"
-                    " (field_path=? OR field_path LIKE ? OR field_path LIKE ?)",
-                    (base, base + "[%", base + ".%"),
+                    f"DELETE FROM evidence WHERE kind='website' AND superseded=0 AND {clause}",
+                    params,
                 )
         now = time.time()
         self._conn.executemany(
@@ -555,16 +569,15 @@ class RunStore:
     def supersede_evidence_tree(self, field_path: str) -> dict[str, int]:
         """Mark evidence for `field_path` and its descendants as stale (value changed).
         Returns counts per kind so callers can warn about replaced website claims."""
+        clause, params = self._subtree_clause(field_path)
         rows = self._conn.execute(
-            "SELECT kind, COUNT(*) AS n FROM evidence WHERE superseded=0 AND"
-            " (field_path=? OR field_path LIKE ? OR field_path LIKE ?) GROUP BY kind",
-            (field_path, field_path + "[%", field_path + ".%"),
+            f"SELECT kind, COUNT(*) AS n FROM evidence WHERE superseded=0 AND {clause}"
+            " GROUP BY kind",
+            params,
         ).fetchall()
         counts = {r["kind"]: int(r["n"]) for r in rows}
         self._conn.execute(
-            "UPDATE evidence SET superseded=1 WHERE superseded=0 AND"
-            " (field_path=? OR field_path LIKE ? OR field_path LIKE ?)",
-            (field_path, field_path + "[%", field_path + ".%"),
+            f"UPDATE evidence SET superseded=1 WHERE superseded=0 AND {clause}", params
         )
         return counts
 
@@ -574,13 +587,15 @@ class RunStore:
         return [dict(r) for r in rows]
 
     # ---- questions -----------------------------------------------------------------
-    def get_question(self, qid: str) -> dict[str, Any] | None:
-        row = self._conn.execute("SELECT * FROM questions WHERE qid=?", (qid,)).fetchone()
-        if not row:
-            return None
+    @staticmethod
+    def _question_from_row(row: sqlite3.Row) -> dict[str, Any]:
         d = dict(row)
         d["field_paths"] = json.loads(d.pop("field_paths_json") or "[]")
         return d
+
+    def get_question(self, qid: str) -> dict[str, Any] | None:
+        row = self._conn.execute("SELECT * FROM questions WHERE qid=?", (qid,)).fetchone()
+        return self._question_from_row(row) if row else None
 
     def upsert_question(
         self, qid: str, kind: str, question: str, why_unclear: str, field_paths: list[str]
@@ -604,12 +619,7 @@ class RunStore:
 
     def list_questions(self) -> list[dict[str, Any]]:
         rows = self._conn.execute("SELECT * FROM questions ORDER BY ordinal").fetchall()
-        out = []
-        for r in rows:
-            d = dict(r)
-            d["field_paths"] = json.loads(d.pop("field_paths_json") or "[]")
-            out.append(d)
-        return out
+        return [self._question_from_row(r) for r in rows]
 
     def questions_asked(self) -> int:
         return self._conn.execute(
@@ -620,11 +630,7 @@ class RunStore:
         row = self._conn.execute(
             "SELECT * FROM questions WHERE status='pending' ORDER BY ordinal LIMIT 1"
         ).fetchone()
-        if not row:
-            return None
-        d = dict(row)
-        d["field_paths"] = json.loads(d.pop("field_paths_json") or "[]")
-        return d
+        return self._question_from_row(row) if row else None
 
     # ---- warnings / conflicts ------------------------------------------------------
     def add_warning(self, code: str, message: str, details: dict[str, Any] | None = None) -> None:
@@ -691,6 +697,11 @@ class RunStore:
         if not row:
             return None
         return int(row["version"]), json.loads(row["profile_json"])
+
+    def latest_profile(self) -> dict[str, Any] | None:
+        """The profile of the latest draft, or None before the first draft."""
+        latest = self.latest_draft()
+        return latest[1] if latest else None
 
     def draft_count(self) -> int:
         return self._conn.execute("SELECT COUNT(*) AS n FROM drafts").fetchone()["n"]

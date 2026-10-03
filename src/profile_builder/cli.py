@@ -32,6 +32,8 @@ console = Console()
 TierOpt = Annotated[
     str | None, typer.Option("--tier", help="Model tier: fast | quality (overridden by --model)")
 ]
+RunIdOpt = Annotated[str, typer.Option("--run-id")]
+RunsDirOpt = Annotated[Path | None, typer.Option("--runs-dir")]
 
 
 def _settings(**overrides) -> Settings:
@@ -161,7 +163,7 @@ def resume(
     ] = None,
     non_interactive: Annotated[bool, typer.Option("--non-interactive")] = False,
     fixtures: Annotated[Path | None, typer.Option("--fixtures")] = None,
-    runs_dir: Annotated[Path | None, typer.Option("--runs-dir")] = None,
+    runs_dir: RunsDirOpt = None,
 ) -> None:
     """Resume a paused or interrupted run from its last checkpoint."""
     settings = _settings(runs_dir=runs_dir)
@@ -183,8 +185,8 @@ def resume(
 
 @app.command()
 def status(
-    run_id: Annotated[str, typer.Option("--run-id")],
-    runs_dir: Annotated[Path | None, typer.Option("--runs-dir")] = None,
+    run_id: RunIdOpt,
+    runs_dir: RunsDirOpt = None,
 ) -> None:
     """Show stage, status, counters, pending question, warnings and cost for a run."""
     settings = _settings(runs_dir=runs_dir)
@@ -245,7 +247,7 @@ def status(
 
 
 @app.command(name="list")
-def list_runs(runs_dir: Annotated[Path | None, typer.Option("--runs-dir")] = None) -> None:
+def list_runs(runs_dir: RunsDirOpt = None) -> None:
     """List runs in the runs directory."""
     settings = _settings(runs_dir=runs_dir)
     root = settings.runs_dir
@@ -294,12 +296,12 @@ def list_runs(runs_dir: Annotated[Path | None, typer.Option("--runs-dir")] = Non
 
 @app.command()
 def inspect(
-    run_id: Annotated[str, typer.Option("--run-id")],
+    run_id: RunIdOpt,
     field: Annotated[
         str | None,
         typer.Option("--field", help="Only fields starting with this path, e.g. customer."),
     ] = None,
-    runs_dir: Annotated[Path | None, typer.Option("--runs-dir")] = None,
+    runs_dir: RunsDirOpt = None,
 ) -> None:
     """Show each populated field with its evidence (source URL + verbatim excerpt, or Q&A)."""
     from profile_builder.schema import ancestors, iter_leaf_paths
@@ -356,8 +358,8 @@ def inspect(
 
 @app.command()
 def export(
-    run_id: Annotated[str, typer.Option("--run-id")],
-    runs_dir: Annotated[Path | None, typer.Option("--runs-dir")] = None,
+    run_id: RunIdOpt,
+    runs_dir: RunsDirOpt = None,
 ) -> None:
     """Re-export company_brain.json / evidence.json / report.md from the latest saved draft."""
     settings = _settings(runs_dir=runs_dir)
@@ -387,13 +389,13 @@ def schema(
 
 @app.command()
 def logs(
-    run_id: Annotated[str, typer.Option("--run-id")],
+    run_id: RunIdOpt,
     tail: Annotated[int | None, typer.Option("--tail", min=1)] = None,
     as_json: Annotated[bool, typer.Option("--json", help="Raw JSON lines")] = False,
     level: Annotated[
         str | None, typer.Option("--level", help="Minimum level: DEBUG|INFO|WARNING|ERROR")
     ] = None,
-    runs_dir: Annotated[Path | None, typer.Option("--runs-dir")] = None,
+    runs_dir: RunsDirOpt = None,
 ) -> None:
     """Show the structured event log of a run."""
     settings = _settings(runs_dir=runs_dir)
@@ -428,7 +430,7 @@ def logs(
 
 
 @app.command()
-def doctor(runs_dir: Annotated[Path | None, typer.Option("--runs-dir")] = None) -> None:
+def doctor(runs_dir: RunsDirOpt = None) -> None:
     """Check configuration: API keys present, providers reachable, runs dir writable."""
     settings = _settings(runs_dir=runs_dir)
     t = Table(title=f"profile-builder {APP_VERSION} — doctor", show_header=True)

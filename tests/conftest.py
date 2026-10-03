@@ -256,12 +256,13 @@ def _offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 @pytest.fixture(autouse=True)
 def _fast_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    import profile_builder.agent.ingest as ingest
     import profile_builder.agent.middleware as mw
-    import profile_builder.agent.tools as tools
 
     monkeypatch.setattr(mw, "RETRY_INITIAL_DELAY_S", 0.0)
     monkeypatch.setattr(mw, "RETRY_MAX_DELAY_S", 0.0)
-    monkeypatch.setattr(tools, "SCRAPE_INTER_REQUEST_DELAY_S", 0.0)
+    # The inter-request sleep lives in the ingest module (fetch_live), so patch it there.
+    monkeypatch.setattr(ingest, "SCRAPE_INTER_REQUEST_DELAY_S", 0.0)
 
 
 @pytest.fixture
