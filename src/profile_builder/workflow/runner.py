@@ -121,6 +121,8 @@ def _initial_input(start_url: str, product: str | None, settings: Settings) -> d
 def default_scraper_factory(fixtures_dir: Path | None) -> ScraperFactory:
     def factory(settings: Settings) -> Scraper:
         if fixtures_dir is not None:
+            if not (Path(fixtures_dir) / "pages").is_dir():
+                raise RuntimeError(f"--fixtures {fixtures_dir}: no 'pages' directory found there")
             return FixtureScraper(fixtures_dir)
         if not settings.has_firecrawl():
             raise RuntimeError(

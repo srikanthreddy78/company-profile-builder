@@ -102,3 +102,14 @@ def test_start_rejects_private_url(settings, monkeypatch):
         ["start", "--url", "http://169.254.169.254/latest", "--fixtures", str(settings.runs_dir)],
     )
     assert result.exit_code == 2 and "rejected" in result.output
+
+
+def test_start_rejects_missing_fixtures_dir_before_creating_a_run(settings, monkeypatch, tmp_path):
+    for k, v in _env(settings).items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.chdir(settings.runs_dir.parent)
+    result = cli.invoke(
+        app, ["start", "--url", "https://acme-example.com/", "--fixtures", str(tmp_path / "nope")]
+    )
+    assert result.exit_code == 2 and "pages" in result.output
+    assert not settings.runs_dir.exists() or not any(settings.runs_dir.iterdir())
