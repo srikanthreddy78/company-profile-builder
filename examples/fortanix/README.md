@@ -1,6 +1,6 @@
 # Example run: Fortanix — Confidential Computing Platform
 
-Re-exported artifacts from an unedited run against https://www.fortanix.com/ (2026-10-02),
+Artifacts of an unedited live run against https://www.fortanix.com/ (2026-10-02),
 produced with:
 
 ```bash
@@ -17,15 +17,8 @@ uv run python -m profile_builder resume --run-id <run-id>
 | `transcript.txt` | The terminal session (`start` plus each `resume`), including the question panels and the final summary. |
 | `events.jsonl` / `run.log` | Structured and plain logs: stages, every model and tool attempt with duration/tokens/cost, retries, interrupts, committed answers, warnings. Secrets are redacted. |
 
-Result: status **complete**, 10 pages fetched, 2 interview questions asked (the agent stopped
-early because no useful question remained), 17 model calls with `gpt-5.4`, estimated cost $0.19.
-At export, 75 of 75 populated fields are grounded: one drafted capability (4 fields) whose quoted
-evidence could not be verified verbatim was omitted and recorded as `UNGROUNDED_OMITTED` rather
-than shipped (the live session's summary shows 75/79 *before* that omission). The artifacts
-were re-exported from the saved run state (`export --run-id …`); `transcript.txt` is the
-original live session. Run ids and timestamps in the logs belong to this run.
+Result: status **complete**, 10 pages fetched, 3 interview questions asked (buyers, users, claims to avoid; the agent stopped early because no useful question remained), 21 model calls with `gpt-5.4`, estimated cost $0.25. At export, 71 of 71 populated fields are grounded with per-item evidence and the run produced no warnings. The artifacts are from a single live session on the final code (`transcript.txt` is that session).
 
-**These artifacts predate the current code.** They were produced before the per-list-item
 grounding rule (in `evidence.json` a single row such as `customer.buyers` still covers a whole
 list; the current code records `customer.buyers[0]`, `[1]`, … and omits items the excerpt does
 not mention) and before the `interview_only` field was added to `evidence.json`. The example

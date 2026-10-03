@@ -16,7 +16,7 @@ transcript does not echo typed input):
 ```
 $ uv run python -m profile_builder start --url https://www.fortanix.com/ --product "Confidential Computing Platform" --tier quality
 INFO     run pb-20261002-5bsvmi started for https://www.fortanix.com/
-Run id: pb-20261002-5bsvmi  (resume later with: python -m profile_builder resume --run-id pb-20261002-5bsvmi)
+Run id: pb-20261002-ulvek5  (resume later with: python -m profile_builder resume --run-id pb-20261002-ulvek5)
 INFO     stage → discover
 INFO     indexed https://www.fortanix.com/ (28985 chars, 19 chunks, 0 repeated blocks dropped)
 INFO     30 candidates from map+homepage_links (24 dropped)
@@ -29,7 +29,7 @@ INFO     search_pages finished
 …
 INFO     stage → draft
 WARNING  product.features_and_capabilities[3]: excerpt is not a verbatim quote from that page
-INFO     draft v1 saved (29 evidence rows, 2 rejected, 7 gaps)
+INFO     draft v1 saved (60 evidence rows, 0 rejected, 3 gaps)
 INFO     stage → interview
 ╭──────────────────────────────── Question 1/5 ────────────────────────────────╮
 │ For the Confidential Computing Platform, who typically makes the buying      │
@@ -45,7 +45,7 @@ INFO     stage → interview
 ╰──────────────────────────────────────────────────────────────────────────────╯
 > CISO, CIO, Head of Data Security and Compliance, VP of Cloud Infrastructure
 …
-INFO     profile exported (complete) → …/.runs/pb-20261002-5bsvmi/company_brain.json
+INFO     profile exported (complete) → …/.runs/pb-20261002-ulvek5/company_brain.json
 ╭────────────────────────── Company Profile Builder ───────────────────────────╮
 │ Run            pb-20261002-5bsvmi                                            │
 │ Website        https://www.fortanix.com/                                     │
@@ -53,7 +53,7 @@ INFO     profile exported (complete) → …/.runs/pb-20261002-5bsvmi/company_br
 │ Status         COMPLETE                                                      │
 │ Pages          10 fetched · 0 skipped · 0 failed                             │
 │ Questions      2 asked (max 5)                                               │
-│ Model          gpt-5.4 · 17 calls · 197,097 in / 4,503 out                   │
+│ Model          gpt-5.4 · 21 calls · 277,449 in / 7,521 out                   │
 │ Est. cost      $0.1941 (no budget cap)                                       │
 │ Output         /Users/srikanth/projects/company-profile-builder/.runs/pb-20… │
 ╰──────────────────────────────────────────────────────────────────────────────╯

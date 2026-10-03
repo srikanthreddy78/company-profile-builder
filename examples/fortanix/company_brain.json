@@ -7,44 +7,43 @@
   },
   "product": {
     "name": "Confidential Computing Platform",
-    "description": "A confidential computing platform and control plane that protects data, AI models, and secrets while they are in use across cloud and on-premises environments.",
-    "positioning": "An enterprise-ready, multi-cloud confidential computing platform that goes beyond infrastructure access by providing policy-driven control, attestation verification, and secure key release for trusted execution environments.",
+    "description": "A confidential computing platform and control plane that protects data and AI models while they are in use inside trusted execution environments across clouds and environments.",
+    "positioning": "A single control plane for confidential computing stacks that helps enterprises secure data-in-use and AI workloads across CPUs and GPUs.",
     "features_and_capabilities": [
       {
-        "name": "Trusted execution environment protection",
-        "description": "Protects data and workloads while they are being processed by isolating critical processes inside secure enclaves.",
-        "how_it_works": "Uses secure enclaves and trusted execution environments to keep data encrypted at runtime and isolate workloads from the OS, hypervisor, and privileged operators.",
-        "customer_benefit": "Keeps sensitive data protected during use, including against insider and cloud operator access."
+        "name": "Trusted execution environment management",
+        "description": "Creates and manages trusted execution environments for AI infrastructure and other workloads.",
+        "how_it_works": "Uses a single control plane to configure, attest, and monitor confidential computing environments.",
+        "customer_benefit": "Helps enforce security, sovereignty, and compliance while reducing exposure of data and AI models in use."
       },
       {
-        "name": "Unified control plane",
-        "description": "Provides centralized management for confidential computing infrastructure and workflows.",
-        "how_it_works": "Lets teams provision, configure, attest, and monitor their confidential computing stack from one place.",
-        "customer_benefit": "Reduces fragmented tooling and management complexity while maintaining control at scale."
+        "name": "Integrity verification and secure key release",
+        "description": "Verifies firmware and software integrity before allowing secure key release.",
+        "how_it_works": "Uses composite attestation across CPU and GPU components to check that workloads run in trusted environments.",
+        "customer_benefit": "Reduces gaps between independently managed components and helps ensure keys are only released to trusted workloads."
       },
       {
-        "name": "Attestation-based key release",
-        "description": "Verifies the integrity of the runtime environment before releasing keys.",
-        "how_it_works": "Uses cryptographic attestation and policy enforcement so keys are released only when workloads run in trusted environments.",
-        "customer_benefit": "Prevents unauthorized environments and privileged users from accessing protected data or model weights."
+        "name": "Centralized operations for confidential computing",
+        "description": "Lets teams provision, configure, and monitor confidential computing infrastructure from one place.",
+        "how_it_works": "Provides one control plane for workflows and policies across the confidential computing stack.",
+        "customer_benefit": "Eliminates management complexity and fragmented tooling while supporting scale."
       },
       {
-        "name": "Multi-cloud and on-prem deployment",
-        "description": "Supports confidential computing across cloud providers and on-premises environments.",
-        "how_it_works": "Allows customers to enroll computing resources in the cloud or on-premises and deploy existing applications within a secure TEE.",
-        "customer_benefit": "Gives organizations flexibility to protect sensitive workloads without being tied to one cloud or needing major application rewrites."
+        "name": "Cross-environment deployment in secure enclaves",
+        "description": "Allows organizations to enroll cloud or on-premises computing resources and deploy existing applications inside secure TEEs.",
+        "how_it_works": "Deploys existing applications within a secure TEE in minutes.",
+        "customer_benefit": "Speeds adoption of confidential computing without development or integration costs."
       }
     ],
     "differentiators": [
-      "Acts as the control plane for confidential computing across clouds and environments rather than only providing infrastructure access.",
-      "Provides policy enforcement, attestation verification, and secure key release so workloads run only in trusted environments.",
-      "Offers an enterprise-ready platform designed to protect data, AI models, and secrets while in use.",
-      "Supports composite attestation across CPUs and GPUs for confidential AI workloads.",
-      "Enables deployment of existing applications within a secure TEE in minutes with no development or integration costs."
+      "Acts as a control plane for confidential computing across clouds and environments rather than only providing infrastructure availability.",
+      "Supports composite attestation across CPU and GPU components from a unified control plane.",
+      "Provides a fast path to deploy existing applications in secure TEEs in minutes with no development or integration costs.",
+      "Supports both on-premises and SaaS deployment models."
     ]
   },
   "customer": {
-    "target_customer": "Enterprises and organizations that handle sensitive or regulated data, especially in highly regulated sectors such as financial services, healthcare, technology, and government.",
+    "target_customer": "Enterprises and highly regulated organizations that need to protect sensitive or personal data and AI workloads while data is being processed.",
     "buyers": [
       "CISO",
       "CIO",
@@ -58,71 +57,69 @@
       "ML engineers running confidential AI workloads"
     ],
     "problems": [
-      "Sensitive data is exposed while being processed, even if it is encrypted at rest and in transit.",
-      "Organizations need to reduce insider, administrator, and cloud operator access to sensitive workloads.",
-      "Highly regulated organizations need stronger privacy, compliance, and data sovereignty controls.",
-      "Teams struggle to securely share or use sensitive data for AI, analytics, and innovation.",
-      "Organizations face operational complexity from fragmented confidential computing infrastructure and tooling."
+      "Sensitive data is most exposed while it is being processed.",
+      "Organizations handling high-value or regulated information need stronger protection than a cloud provider's limited built-in data security.",
+      "Teams need to share or use sensitive data for AI and collaboration without exposing it.",
+      "Managing confidential computing infrastructure across environments can create operational complexity and fragmented tooling."
     ],
     "use_cases": [
-      "Protecting applications and data while in use in secure enclaves.",
-      "Securing AI training and inference so data and model weights are not exposed during processing.",
-      "Enabling secure healthcare data collaboration for machine learning and AI development.",
-      "Protecting sensitive financial and personally identifiable information while accelerating digital transformation.",
-      "Supporting secure data-driven innovation and cross-organizational data sharing."
+      "Protecting data in use for machine learning models and AI workloads.",
+      "Securing healthcare AI and access to sensitive clinical data.",
+      "Sharing data with third parties in a confidential compute environment.",
+      "Protecting blockchain, crypto wallets, and NFTs in fintech and crypto contexts."
     ],
     "desired_outcomes": [
-      "Protect sensitive data, AI models, and secrets while they are in use.",
-      "Meet compliance and data sovereignty requirements such as GDPR, HIPAA, and similar regulations.",
-      "Reduce insider threat and privileged access risk.",
-      "Safely use data to innovate, collaborate, and build AI applications.",
-      "Simplify confidential computing operations and scale securely across environments."
+      "Protect data and AI models while in active use.",
+      "Meet privacy, compliance, and data sovereignty requirements.",
+      "Reduce unauthorized access and malicious tampering risks.",
+      "Improve collaboration and innovation with sensitive data."
     ],
     "existing_alternatives": [
-      "Cloud-provider confidential computing infrastructure such as Azure Confidential Computing.",
-      "Relying only on encryption at rest and in transit without protecting data in use."
+      "Relying on a cloud provider's limited data security controls.",
+      "Using confidential computing infrastructure that primarily focuses on infrastructure availability within a single cloud ecosystem."
     ]
   },
   "content_evidence": {
     "customer_stories": [
-      "BeeKeeperAI used Fortanix Confidential Computing to accelerate healthcare AI and enable secure healthcare data collaboration.",
-      "Goldman Sachs is cited as a customer with Fortanix technology benefits seen first-hand, though the case study focuses on DSM rather than this product specifically."
+      "BeeKeeperAI uses Fortanix Confidential Computing to accelerate healthcare AI and enable secure healthcare data collaboration.",
+      "Goldman Sachs is cited by Fortanix as a customer and partner in financial services content."
     ],
     "company_expertise": [
-      "Fortanix says it is a pioneer in Confidential Computing.",
-      "Fortanix cites 100+ security patents, 30+ papers in top conferences, and presentations at USENIX, CCC, and Blackhat.",
+      "Fortanix says it has 100+ security patents, 30+ papers in top conferences, and presenters at USENIX, CCC, and Blackhat.",
       "Fortanix says it is a founding member of the Confidential Computing Consortium of the Linux Foundation."
     ],
     "product_evidence": [
-      "Fortanix says it encrypts data in use across cloud applications, storage, and on-prem environments by isolating critical processes in a secure enclave.",
-      "Fortanix says Confidential Computing Manager provides a single control plane to configure, attest, and monitor confidential computing infrastructure across CPUs and GPUs.",
-      "Fortanix says keys are released only after cryptographic attestation and policy checks are met."
+      "Fortanix describes Confidential Computing Manager as a single control plane for managing secure enclaves, integrity verification, and protection of data and AI models in trusted execution environments.",
+      "Fortanix says confidential computing protects information when it is being processed using hardware-based trusted execution environments or physical enclaves that keep data encrypted at runtime."
     ],
     "proprietary_insights_or_examples": [
-      "Fortanix describes composite attestation across CPU and GPU to close security gaps between independently managed components.",
-      "Fortanix describes secure key release tied to verified firmware and software integrity."
+      "Fortanix describes composite attestation across CPU and GPU and lists support for Intel TDX, AMD SEV-SNP, and NVIDIA Blackwell and Hopper."
     ]
   },
   "brand": {
     "voice_and_tone": [
       "Security-focused",
+      "Compliance-oriented",
       "Enterprise-oriented",
-      "Compliance-conscious",
-      "Innovation-enabling"
+      "Innovation-forward"
     ],
     "writing_style": [
-      "Uses concise benefit-led statements",
-      "Frequently contrasts protection in-use with at-rest and in-transit",
-      "Uses technical security terminology such as attestation, secure enclave, and Trusted Execution Environments"
+      "Benefit-led headlines",
+      "Uses technical security terms alongside business outcomes",
+      "Frequently frames security in terms of protecting data while in use"
     ],
     "preferred_terms": [
       "Confidential Computing",
-      "data in-use",
       "Trusted Execution Environments",
-      "secure enclave",
-      "attestation",
-      "control plane"
+      "secure enclaves",
+      "data in use",
+      "control plane",
+      "sovereignty"
     ],
-    "terms_or_claims_to_avoid": []
+    "terms_or_claims_to_avoid": [
+      "Avoid absolute security claims such as unhackable, unbreakable, or 100% secure",
+      "Avoid military-grade",
+      "Do not state specific patent counts"
+    ]
   }
 }
