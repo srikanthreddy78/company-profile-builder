@@ -16,9 +16,9 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from langchain.tools import tool
+from langchain.tools import InjectedToolCallId, tool
 from langgraph.types import interrupt
 from pydantic import ValidationError
 
@@ -42,6 +42,7 @@ from profile_builder.logging_setup import event, get_logger, redact_text, set_ru
 from profile_builder.retrieval.chunking import text_hash
 from profile_builder.retrieval.index import HybridIndex, tokenize
 from profile_builder.schema import (
+    FEATURE_FIELDS,
     FEATURE_LIST_PATH,
     STRING_LIST_PATHS,
     STRING_PATHS,
@@ -59,7 +60,7 @@ from profile_builder.security import (
     sanitize_answer,
     url_cache_name,
 )
-from profile_builder.state.run_store import PageRecord, RunStore
+from profile_builder.state.run_store import PageRecord, RunStore, shift_path_set
 from profile_builder.web.discovery import discover
 from profile_builder.web.robots import RobotsChecker
 from profile_builder.web.scraper import (
@@ -105,6 +106,8 @@ TRANSIENT_CODES = frozenset(
     {"RATE_LIMITED", "TIMEOUT", "SERVER_ERROR", "NETWORK", "TRANSIENT", "HTTP_429", "HTTP_408"}
 )
 STAGES = ("discover", "scrape", "research", "draft", "interview", "finalize", "done")
+ALL_BASES: tuple[str, ...] = (*STRING_PATHS, *STRING_LIST_PATHS, FEATURE_LIST_PATH)
+REPAIR_KEY_META = "repair_last_key"  # tool call + payload that last failed validation
 
 
 class FatalProfileError(RuntimeError):
@@ -189,6 +192,29 @@ def _format_validation_error(exc: ValidationError) -> list[str]:
         loc = ".".join(str(p) for p in err.get("loc", ()))
         out.append(f"{loc}: {err.get('msg')}")
     return out
+
+
+def _payload_key(tool_call_id: str, payload: Any) -> str:
+    """Identity of one tool call: a crash replay re-runs the same call id with the same
+    payload and must not count as a second repair attempt; a fresh call does."""
+    digest = hashlib.sha1(
+        json.dumps(payload, sort_keys=True, default=str).encode("utf-8"), usedforsecurity=False
+    ).hexdigest()
+    return f"{tool_call_id}:{digest}"
+
+
+def _descends(path: str, root: str) -> bool:
+    return path == root or path.startswith(root + "[") or path.startswith(root + ".")
+
+
+def no_usable_pages_message(store: RunStore) -> tuple[str, dict[str, Any]]:
+    """Warning text + details for a run in which no page could be fetched."""
+    attempted = [{"url": p.url, "error_code": p.error_code or p.status} for p in store.list_pages()]
+    detail = (
+        "; ".join(f"{p['url']} ({p['error_code']})" for p in attempted[:10])
+        or "no page was attempted"
+    )
+    return f"no usable pages were fetched: {detail}", {"pages": attempted}
 
 
 # --------------------------------------------------------------------------------------
@@ -298,6 +324,7 @@ def process_page(ctx: ToolContext, page: ScrapedPage, requested_url: str) -> dic
         )
 
     cache_name = url_cache_name(url)
+    # Links are kept so a replayed/second discovery can reuse the cached homepage's links.
     stored = ScrapedPage(
         url=url,
         final_url=final_norm,
@@ -305,12 +332,18 @@ def process_page(ctx: ToolContext, page: ScrapedPage, requested_url: str) -> dic
         description=page.description,
         markdown=markdown,
         http_status=page.http_status,
-        links=[],
+        links=[str(link) for link in (page.links or [])],
     )
     atomic_write_text(ctx.pages_dir / cache_name, stored.to_json())
     ctx._page_text_cache[url] = markdown
 
     kept, dropped = ctx.index.index_page(url, markdown, title=page.title)
+    if ctx.index.last_embedding_error:
+        ctx.warn(
+            "EMBEDDINGS_UNAVAILABLE",
+            f"embedding provider failed for {url}; indexed with keyword search only: "
+            f"{ctx.index.last_embedding_error}",
+        )
     ctx.store.upsert_page(
         PageRecord(
             url,
@@ -388,10 +421,44 @@ def make_tools(ctx: ToolContext) -> list[Any]:
             check_dns=ctx.check_dns,
             homepage=cached_home,
         )
-        if cached_home is None and result.homepage is not None:
-            store.increment_counter("scrape_attempts")
+        if cached_home is None:
+            store.increment_counter("scrape_attempts")  # a live homepage fetch was attempted
         for note in result.notes:
             ctx.warn("DISCOVERY_NOTE", note)
+        if result.homepage_error is not None:
+            # Permanent homepage failure (404/403/402...): record it, keep going with the map.
+            exc = result.homepage_error
+            err = redact_text(str(exc))
+            store.upsert_page(
+                PageRecord(
+                    url,
+                    None,
+                    "failed",
+                    exc.http_status,
+                    None,
+                    None,
+                    0,
+                    None,
+                    exc.code,
+                    err,
+                    True,
+                    time.time(),
+                )
+            )
+            ctx.warn(f"PAGE_SKIPPED_{exc.code}", f"{url} skipped: {err}")
+            if not result.candidates:
+                return _json(
+                    {
+                        "ok": False,
+                        "error_code": "HOMEPAGE_UNAVAILABLE",
+                        "error": (
+                            f"the homepage could not be fetched ({err}) and no other page was "
+                            "discovered. Check the start URL (scheme, www vs. non-www, trailing "
+                            "path) or start from another page of the same site."
+                        ),
+                        "notes": result.notes,
+                    }
+                )
         if result.homepage is not None and ctx.page_budget_remaining() > 0:
             process_page(ctx, result.homepage, url)
         event(
@@ -435,11 +502,13 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         results: list[dict[str, Any]] = []
         seen: set[str] = set()
         live_fetches = 0
-        requested = list(urls or [])
+        transient_failure: TransientScrapeError | None = None
+        requested = [str(u) for u in (urls or [])]
         if len(requested) > MAX_URLS_PER_SCRAPE_CALL:
             results.append(
                 {
-                    "note": f"only the first {MAX_URLS_PER_SCRAPE_CALL} of {len(requested)} URLs were considered"
+                    "note": f"only the first {MAX_URLS_PER_SCRAPE_CALL} of {len(requested)} URLs were considered",
+                    "error_code": "TOO_MANY_URLS",
                 }
             )
             requested = requested[:MAX_URLS_PER_SCRAPE_CALL]
@@ -449,14 +518,26 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                 url = validate_url(raw, check_dns=ctx.check_dns)
             except URLGuardError as exc:
                 ctx.warn("URL_REJECTED", f"{raw} rejected: {exc}")
-                results.append({"url": raw, "status": "rejected", "error": str(exc)})
+                results.append(
+                    {
+                        "url": raw,
+                        "status": "rejected",
+                        "error": str(exc),
+                        "error_code": "URL_REJECTED",
+                    }
+                )
                 continue
             if url in seen:
                 continue
             seen.add(url)
             if not same_site(url, ctx.start_url):
                 results.append(
-                    {"url": url, "status": "rejected", "error": "not on the company's website"}
+                    {
+                        "url": url,
+                        "status": "rejected",
+                        "error": "not on the company's website",
+                        "error_code": "OFFSITE",
+                    }
                 )
                 continue
             existing = store.get_page(url)
@@ -480,7 +561,12 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                 and not is_transient_code(existing.error_code)
             ):
                 results.append(
-                    {"url": url, "status": "failed", "error": f"already failed: {existing.error}"}
+                    {
+                        "url": url,
+                        "status": "failed",
+                        "error": f"already failed: {existing.error}",
+                        "error_code": existing.error_code,
+                    }
                 )
                 continue
             if store.get_counter("scrape_attempts") >= max_attempts:
@@ -490,7 +576,12 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                         f"fetch attempt limit of {max_attempts} reached",
                     )
                 results.append(
-                    {"url": url, "status": "not_fetched", "error": "fetch attempt budget exhausted"}
+                    {
+                        "url": url,
+                        "status": "not_fetched",
+                        "error": "fetch attempt budget exhausted",
+                        "error_code": "FETCH_BUDGET_EXHAUSTED",
+                    }
                 )
                 continue
             if ctx.page_budget_remaining() <= 0:
@@ -507,7 +598,12 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                         count=settings.max_pages,
                     )
                 results.append(
-                    {"url": url, "status": "not_fetched", "error": "page budget exhausted"}
+                    {
+                        "url": url,
+                        "status": "not_fetched",
+                        "error": "page budget exhausted",
+                        "error_code": "PAGE_BUDGET_EXHAUSTED",
+                    }
                 )
                 continue
             if not ctx.robots.allowed(url):
@@ -539,7 +635,10 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                 try:
                     page = ctx.scraper.scrape(url, timeout_ms=settings.scrape_timeout_ms)
                 except TransientScrapeError as exc:
-                    # Record the attempt, then let the retry middleware retry the whole call.
+                    # Record the attempt and carry on with the other URLs; the error is
+                    # re-raised once at the end so the retry middleware retries the call
+                    # (already-fetched pages are then free) without starving the batch.
+                    err = redact_text(str(exc))
                     store.upsert_page(
                         PageRecord(
                             url,
@@ -551,7 +650,7 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                             0,
                             None,
                             exc.code,
-                            redact_text(str(exc)),
+                            err,
                             True,
                             time.time(),
                         )
@@ -565,7 +664,16 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                         status="transient",
                         code=exc.code,
                     )
-                    raise
+                    results.append(
+                        {
+                            "url": url,
+                            "status": "transient_failure",
+                            "error": err,
+                            "error_code": exc.code,
+                        }
+                    )
+                    transient_failure = transient_failure or exc
+                    continue
                 except PermanentScrapeError as exc:
                     err = redact_text(str(exc))
                     store.upsert_page(
@@ -585,9 +693,13 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                         )
                     )
                     ctx.warn(f"PAGE_SKIPPED_{exc.code}", f"{url} skipped: {err}")
-                    results.append({"url": url, "status": "failed", "error": err})
+                    results.append(
+                        {"url": url, "status": "failed", "error": err, "error_code": exc.code}
+                    )
                     continue
             results.append(process_page(ctx, page, url))
+        if transient_failure is not None:
+            raise transient_failure
         return _json(
             {
                 "ok": True,
@@ -677,15 +789,22 @@ def make_tools(ctx: ToolContext) -> list[Any]:
             for p in paths:
                 parse_field_path(p)
         except FieldPathError as exc:
-            return _json({"ok": False, "error": f"invalid field path: {exc}"})
+            return _json(
+                {"ok": False, "error": f"invalid field path: {exc}", "error_code": "BAD_PATH"}
+            )
         if not paths and kind != "product_selection":
             return _json(
-                {"ok": False, "error": "field_paths must name at least one contract field"}
+                {
+                    "ok": False,
+                    "error": "field_paths must name at least one contract field",
+                    "error_code": "NO_FIELD_PATHS",
+                }
             )
         if is_multi_question(question):
             return _json(
                 {
                     "ok": False,
+                    "error_code": "MULTI_QUESTION",
                     "error": (
                         "ask ONE focused question per call (this text bundles several numbered or "
                         "question-marked items). Call ask_user again with the single most important "
@@ -699,17 +818,35 @@ def make_tools(ctx: ToolContext) -> list[Any]:
             usedforsecurity=False,
         ).hexdigest()[:12]
 
+        def _remaining() -> int:
+            return max(0, settings.max_questions - store.questions_asked())
+
         existing = store.get_question(qid)
         if existing and existing["status"] != "pending":
             # Replay after a crash: the answer is already committed; never re-ask.
+            status = "answered" if existing["status"] == "preset" else existing["status"]
             return _json(
                 {
                     "ok": True,
                     "qid": qid,
-                    "status": existing["status"],
-                    "answer": existing["answer"],
-                    "questions_remaining": max(0, settings.max_questions - store.questions_asked()),
+                    "status": status,
+                    "answer": existing["answer"] if status == "answered" else status.upper(),
+                    "questions_remaining": _remaining(),
                     "note": "answer already recorded",
+                }
+            )
+        if kind == "product_selection" and ctx.product_focus:
+            # Preset on the command line: recorded for traceability, never asked, not counted.
+            store.upsert_question(qid, kind, question, why_unclear, paths)
+            store.answer_question(qid, "preset", ctx.product_focus)
+            return _json(
+                {
+                    "ok": True,
+                    "qid": qid,
+                    "status": "answered",
+                    "answer": ctx.product_focus,
+                    "questions_remaining": _remaining(),
+                    "note": "product focus was preset on the command line (not counted as a question)",
                 }
             )
         if store.questions_asked() >= settings.max_questions:
@@ -727,20 +864,8 @@ def make_tools(ctx: ToolContext) -> list[Any]:
             return _json(
                 {
                     "ok": False,
+                    "error_code": "QUESTION_LIMIT",
                     "error": "question limit reached; finalize the profile with the evidence you have",
-                }
-            )
-
-        if kind == "product_selection" and ctx.product_focus:
-            store.upsert_question(qid, kind, question, why_unclear, paths)
-            store.answer_question(qid, "answered", ctx.product_focus)
-            return _json(
-                {
-                    "ok": True,
-                    "qid": qid,
-                    "status": "answered",
-                    "answer": ctx.product_focus,
-                    "note": "product focus was preset on the command line",
                 }
             )
 
@@ -778,7 +903,6 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         if kind == "product_selection" and status == "answered":
             ctx.product_focus = stored_answer
             store.set_product_focus(stored_answer or "")
-        remaining = max(0, settings.max_questions - store.questions_asked())
         result_answer = stored_answer if status == "answered" else status.upper()
         return _json(
             {
@@ -786,7 +910,7 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                 "qid": qid,
                 "status": status,
                 "answer": result_answer,
-                "questions_remaining": remaining,
+                "questions_remaining": _remaining(),
             }
         )
 
@@ -811,24 +935,33 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         vt = _stems(_value_text(value))
         return not vt or bool(vt & _stems(text))
 
+    def _reject(path: str, code: str, reason: str) -> dict[str, Any]:
+        return {"field_path": path, "reason": reason, "reason_code": code}
+
     def _verify_website_evidence(
         profile: dict[str, Any], items: list[dict[str, Any]]
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Accepted rows are per leaf: evidence cited for a whole list is recorded per item
+        (`base[i]`) for exactly the items the excerpt supports; unsupported items are listed
+        back so the model can cite them separately."""
         accepted: list[dict[str, Any]] = []
         rejected: list[dict[str, Any]] = []
         fetched = store.fetched_urls()
         for item in items or []:
+            if not isinstance(item, dict):
+                rejected.append(_reject("", "BAD_PATH", "evidence item must be an object"))
+                continue
             path = str(item.get("field_path", "")).strip()
             src = str(item.get("source_url", "")).strip()
             excerpt = str(item.get("excerpt", "")).strip()
             try:
-                parse_field_path(path)
+                _base, index, _sub = parse_field_path(path)
             except FieldPathError as exc:
-                rejected.append({"field_path": path, "reason": str(exc)})
+                rejected.append(_reject(path, "BAD_PATH", str(exc)))
                 continue
             value = get_by_path(profile, path)
             if value in ("", [], None):
-                rejected.append({"field_path": path, "reason": "field is empty in the profile"})
+                rejected.append(_reject(path, "FIELD_EMPTY", "field is empty in the profile"))
                 continue
             try:
                 src_norm = normalize_url(src) if src else ""
@@ -836,44 +969,82 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                 src_norm = ""
             if src_norm not in fetched:
                 rejected.append(
-                    {"field_path": path, "reason": "source_url is not a page fetched in this run"}
+                    _reject(
+                        path, "SOURCE_NOT_FETCHED", "source_url is not a page fetched in this run"
+                    )
                 )
                 continue
             if len(excerpt) < MIN_EXCERPT_CHARS:
                 rejected.append(
-                    {
-                        "field_path": path,
-                        "reason": f"excerpt too short to ground a claim (min {MIN_EXCERPT_CHARS} chars)",
-                    }
+                    _reject(
+                        path,
+                        "TOO_SHORT",
+                        f"excerpt too short to ground a claim (min {MIN_EXCERPT_CHARS} chars)",
+                    )
                 )
                 continue
             if len(excerpt) > MAX_EVIDENCE_EXCERPT_CHARS:
                 rejected.append(
-                    {
-                        "field_path": path,
-                        "reason": f"excerpt too long (max {MAX_EVIDENCE_EXCERPT_CHARS} chars); quote only the relevant passage",
-                    }
+                    _reject(
+                        path,
+                        "TOO_LONG",
+                        f"excerpt too long (max {MAX_EVIDENCE_EXCERPT_CHARS} chars); quote only the relevant passage",
+                    )
                 )
                 continue
             page_text = ctx.page_text(src_norm) or ""
             if not excerpt_in_page(excerpt, page_text):
                 rejected.append(
-                    {"field_path": path, "reason": "excerpt is not a verbatim quote from that page"}
+                    _reject(path, "NOT_VERBATIM", "excerpt is not a verbatim quote from that page")
                 )
+                continue
+            if index is None and isinstance(value, list):
+                supported = [i for i, v in enumerate(value) if _supports(path, v, excerpt)]
+                if not supported:
+                    rejected.append(
+                        _reject(
+                            path,
+                            "NO_OVERLAP",
+                            "excerpt does not mention any item of this list; cite one passage per item",
+                        )
+                    )
+                    continue
+                for i in range(len(value)):
+                    if i in supported:
+                        accepted.append(
+                            {
+                                "field_path": f"{path}[{i}]",
+                                "source_url": src_norm,
+                                "excerpt": excerpt,
+                            }
+                        )
+                    else:
+                        rejected.append(
+                            _reject(
+                                f"{path}[{i}]",
+                                "NO_OVERLAP",
+                                "excerpt does not mention this list item; cite the passage it comes from",
+                            )
+                        )
                 continue
             if not _supports(path, value, excerpt):
                 rejected.append(
-                    {
-                        "field_path": path,
-                        "reason": "excerpt does not mention the field value; quote the passage the value comes from",
-                    }
+                    _reject(
+                        path,
+                        "NO_OVERLAP",
+                        "excerpt does not mention the field value; quote the passage the value comes from",
+                    )
                 )
                 continue
             accepted.append({"field_path": path, "source_url": src_norm, "excerpt": excerpt})
         return accepted, rejected
 
-    def _repair_or_fail(errors: list[str], what: str) -> str:
-        attempts = store.increment_counter("repair_attempts")
+    def _repair_or_fail(errors: list[str], what: str, *, call_key: str) -> str:
+        if store.get_meta(REPAIR_KEY_META) == call_key:
+            attempts = store.get_counter("repair_attempts")  # crash replay of the same call
+        else:
+            attempts = store.increment_counter("repair_attempts")
+            store.set_meta(REPAIR_KEY_META, call_key)
         event(
             log,
             "repair_attempt",
@@ -891,11 +1062,16 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         return _json(
             {
                 "ok": False,
+                "error_code": "INVALID_PROFILE",
                 "errors": errors,
                 "repair_attempts_remaining": MAX_REPAIR_ATTEMPTS - attempts + 1,
                 "hint": "fix the listed fields and call again with the full corrected input",
             }
         )
+
+    def _reset_repairs() -> None:
+        store.set_counter("repair_attempts", 0)
+        store.set_meta(REPAIR_KEY_META, "")
 
     def _thin_draft_advice(profile: dict[str, Any], *, strict: bool = False) -> str | None:
         """Push back when the draft leaves sections empty although pages are indexed: the
@@ -950,12 +1126,17 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         }
 
     @tool
-    def save_profile_draft(profile: dict[str, Any], evidence: list[dict[str, Any]]) -> str:
+    def save_profile_draft(
+        profile: dict[str, Any],
+        evidence: list[dict[str, Any]],
+        tool_call_id: Annotated[str, InjectedToolCallId],
+    ) -> str:
         """Save the full draft profile (exact company_brain shape) plus evidence. Each evidence
         item is {"field_path": "...", "source_url": "...", "excerpt": "<verbatim text from that
-        page>"}; a field path may point at a whole list ("customer.buyers") or an item
-        ("customer.buyers[0]"). Unverifiable evidence is rejected and listed back. Returns the
-        validation result, grounding stats and the prioritized gaps to interview about."""
+        page>"}; cite list items individually ("customer.buyers[0]"): an excerpt given for a
+        whole list only grounds the items it mentions. Unverifiable evidence is rejected and
+        listed back. Returns the validation result, grounding stats and the prioritized gaps
+        to interview about."""
         ctx.set_stage("draft")
         data = copy.deepcopy(profile) if isinstance(profile, dict) else {}
         data, unknown = strip_unknown_keys(data)
@@ -969,17 +1150,21 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                 data["company"]["website_url"] = ctx.start_url
             brain = CompanyBrain.model_validate(data)
         except ValidationError as exc:
-            return _repair_or_fail(_format_validation_error(exc), "profile draft")
+            return _repair_or_fail(
+                _format_validation_error(exc),
+                "profile draft",
+                call_key=_payload_key(tool_call_id, profile),
+            )
         clean = brain.model_dump(mode="json")
         # Merge with the previous draft: a later draft may never erase a field that an earlier
         # one filled (the model sometimes re-sends a thinner profile after the interview).
         kept_from_previous: list[str] = []
         protected_by_user: list[str] = []
+        user_bases = store.interview_bases()
         previous = store.latest_draft()
         if previous is not None:
             _, prev = previous
-            user_bases = store.interview_bases()
-            for base in (*STRING_PATHS, *STRING_LIST_PATHS, FEATURE_LIST_PATH):
+            for base in ALL_BASES:
                 new_val, old_val = get_by_path(clean, base), get_by_path(prev, base)
                 if base in user_bases and new_val != old_val:
                     # An explicit user answer always wins over a later website-based draft.
@@ -989,16 +1174,37 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                     set_by_path(clean, base, copy.deepcopy(old_val))
                     kept_from_previous.append(base)
             clean = CompanyBrain.model_validate(clean).model_dump(mode="json")
-        restated = {
-            base
-            for base in (*STRING_PATHS, *STRING_LIST_PATHS, FEATURE_LIST_PATH)
-            if base not in kept_from_previous and base not in protected_by_user
-        }
+            changed = {
+                base
+                for base in ALL_BASES
+                if base not in user_bases and get_by_path(clean, base) != get_by_path(prev, base)
+            }
+        else:
+            changed = set(ALL_BASES)
         accepted, rejected = _verify_website_evidence(clean, evidence)
-        store.replace_website_evidence(accepted, only_fields=restated)
+        # Website evidence never attaches to a field the user answered.
+        protected_rows = [a for a in accepted if a["field_path"].split("[")[0] in user_bases]
+        accepted = [a for a in accepted if a["field_path"].split("[")[0] not in user_bases]
+        rejected.extend(
+            _reject(
+                a["field_path"],
+                "USER_ANSWER_PROTECTED",
+                "this field was set by a user answer; website evidence cannot replace it",
+            )
+            for a in protected_rows
+        )
+        # Replace evidence only where the value changed or fresh evidence was supplied, so an
+        # unchanged field never loses its grounding because the model omitted the evidence.
+        replace_bases = (changed | {a["field_path"].split("[")[0] for a in accepted}) - user_bases
+        store.replace_website_evidence(accepted, only_fields=replace_bases)
         for r in rejected:
-            ctx.warn("EVIDENCE_REJECTED", f"{r['field_path']}: {r['reason']}")
-        store.set_counter("repair_attempts", 0)
+            ctx.warn(
+                "EVIDENCE_REJECTED",
+                f"{r['field_path']}: {r['reason']}",
+                field_path=r["field_path"],
+                reason_code=r.get("reason_code"),
+            )
+        _reset_repairs()
         version = store.save_draft(clean, "draft")
         payload = _gap_payload(clean)
         event(
@@ -1023,75 +1229,119 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         )
 
     @tool
-    def apply_profile_updates(updates: list[dict[str, Any]]) -> str:
+    def apply_profile_updates(
+        updates: list[dict[str, Any]], tool_call_id: Annotated[str, InjectedToolCallId]
+    ) -> str:
         """Apply targeted changes to the saved draft. Each update is {"field_path": "...",
         "value": <string, list of strings, or feature object>, "evidence": {"kind": "interview",
         "question_id": "<qid>"} or {"kind": "website", "source_url": "...", "excerpt": "<verbatim>"}}.
         Use list index "[n]" to replace an item or "[len]" to append. A user answer that
         contradicts the website supersedes it (the original evidence is kept and a warning is
-        recorded). Updates without valid evidence are rejected."""
+        recorded). Updates without valid evidence are rejected individually; the rest apply."""
         ctx.set_stage("draft")
         latest = store.latest_draft()
         if latest is None:
-            return _json({"ok": False, "error": "no draft yet; call save_profile_draft first"})
+            return _json(
+                {
+                    "ok": False,
+                    "error": "no draft yet; call save_profile_draft first",
+                    "error_code": "NO_DRAFT",
+                }
+            )
         _, profile = latest
         data = copy.deepcopy(profile)
         applied: list[str] = []
         rejected: list[dict[str, Any]] = []
         pending_evidence: list[dict[str, Any]] = []
-        for upd in updates or []:
+        user_bases = store.interview_bases()
+        for upd in updates if isinstance(updates, list) else []:
+            if not isinstance(upd, dict):
+                rejected.append(_reject("", "BAD_PATH", "each update must be an object"))
+                continue
             path = str(upd.get("field_path", "")).strip()
-            ev = upd.get("evidence") or {}
+            ev = upd.get("evidence")
             try:
                 parse_field_path(path)
             except FieldPathError as exc:
-                rejected.append({"field_path": path, "reason": str(exc)})
+                rejected.append(_reject(path, "BAD_PATH", str(exc)))
+                continue
+            if not isinstance(ev, dict):
+                rejected.append(
+                    _reject(
+                        path,
+                        "BAD_EVIDENCE_KIND",
+                        'evidence must be an object: {"kind": "interview", "question_id": ...} '
+                        'or {"kind": "website", "source_url": ..., "excerpt": ...}',
+                    )
+                )
                 continue
             kind = str(ev.get("kind", "")).lower()
+            q: dict[str, Any] | None = None
             if kind == "interview":
                 q = store.get_question(str(ev.get("question_id", "")))
-                if not q or q["status"] != "answered":
+                if not q or q["status"] not in ("answered", "preset"):
                     rejected.append(
-                        {
-                            "field_path": path,
-                            "reason": "evidence must reference an answered question id",
-                        }
+                        _reject(
+                            path,
+                            "QUESTION_NOT_ANSWERED",
+                            "evidence must reference an answered question id",
+                        )
                     )
                     continue
                 covered = {fp.split("[")[0] for fp in q["field_paths"]}
                 if path.split("[")[0] not in covered and q["kind"] != "product_selection":
                     rejected.append(
-                        {
-                            "field_path": path,
-                            "reason": f"question {q['qid']} did not cover this field (it covered {sorted(covered)})",
-                        }
+                        _reject(
+                            path,
+                            "QUESTION_SCOPE",
+                            f"question {q['qid']} did not cover this field (it covered {sorted(covered)})",
+                        )
                     )
                     continue
                 if not _supports(path, upd.get("value"), q["answer"] or ""):
                     rejected.append(
-                        {"field_path": path, "reason": "value does not reflect the user's answer"}
+                        _reject(path, "ANSWER_MISMATCH", "value does not reflect the user's answer")
                     )
                     continue
             elif kind == "website":
-                if path.split("[")[0] in store.interview_bases():
+                if path.split("[")[0] in user_bases:
                     rejected.append(
-                        {
-                            "field_path": path,
-                            "reason": "this field was set by a user answer; website evidence "
-                            "cannot override it (ask the user instead)",
-                        }
+                        _reject(
+                            path,
+                            "USER_ANSWER_PROTECTED",
+                            "this field was set by a user answer; website evidence cannot "
+                            "override it (ask the user instead)",
+                        )
                     )
                     continue
             else:
                 rejected.append(
-                    {"field_path": path, "reason": "evidence.kind must be 'interview' or 'website'"}
+                    _reject(
+                        path, "BAD_EVIDENCE_KIND", "evidence.kind must be 'interview' or 'website'"
+                    )
                 )
                 continue
+            # Every update is applied on a snapshot: a rejected one (bad evidence, invalid
+            # value) is rolled back completely, so an appended item never lingers as a
+            # placeholder and never costs a repair attempt.
+            snapshot = copy.deepcopy(data)
             old = get_by_path(data, path)
             try:
                 set_by_path(data, path, upd.get("value"))
+                CompanyBrain.model_validate(data)
             except FieldPathError as exc:
-                rejected.append({"field_path": path, "reason": str(exc)})
+                data = snapshot
+                rejected.append(_reject(path, "BAD_PATH", str(exc)))
+                continue
+            except ValidationError as exc:
+                data = snapshot
+                rejected.append(
+                    _reject(
+                        path,
+                        "INVALID_VALUE",
+                        "value is invalid: " + "; ".join(_format_validation_error(exc)[:3]),
+                    )
+                )
                 continue
             if kind == "website":
                 acc, rej = _verify_website_evidence(
@@ -1104,14 +1354,22 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                         }
                     ],
                 )
-                if rej:
-                    set_by_path(data, path, old)
+                if not acc:
+                    data = snapshot
                     rejected.append(rej[0])
                     continue
+                rejected.extend(rej)  # list items the excerpt did not cover
                 pending_evidence.append(
-                    {"kind": "website", "old": old, "value": upd.get("value"), **acc[0]}
+                    {
+                        "kind": "website",
+                        "field_path": path,
+                        "old": old,
+                        "value": upd.get("value"),
+                        "rows": acc,
+                    }
                 )
             else:
+                assert q is not None
                 pending_evidence.append(
                     {
                         "kind": "interview",
@@ -1127,35 +1385,51 @@ def make_tools(ctx: ToolContext) -> list[Any]:
             return _json({"ok": False, "applied": [], "rejected": rejected, **_gap_payload(data)})
         try:
             brain = CompanyBrain.model_validate(data)
-        except ValidationError as exc:
-            return _repair_or_fail(_format_validation_error(exc), "profile update")
+        except ValidationError as exc:  # pragma: no cover - every update was validated above
+            return _repair_or_fail(
+                _format_validation_error(exc),
+                "profile update",
+                call_key=_payload_key(tool_call_id, updates),
+            )
         clean = brain.model_dump(mode="json")
         for ev in pending_evidence:
+            path = ev["field_path"]
             old, value = ev.get("old"), ev.get("value")
             changed = old not in ("", [], None) and old != value
-            stale = store.supersede_evidence_tree(ev["field_path"]) if changed else {}
+            stale = store.supersede_evidence_tree(path) if changed else {}
             if ev["kind"] == "website":
-                store.add_evidence(
-                    ev["field_path"], "website", source_url=ev["source_url"], excerpt=ev["excerpt"]
-                )
+                for row in ev["rows"]:
+                    store.add_evidence(
+                        row["field_path"],
+                        "website",
+                        source_url=row["source_url"],
+                        excerpt=row["excerpt"],
+                    )
             else:
                 if stale.get("website"):
                     ctx.warn(
                         "USER_CORRECTION_SUPERSEDES_SITE",
-                        f"{ev['field_path']}: user answer replaced the website claim (original evidence preserved)",
+                        f"{path}: user answer replaced the website claim (original evidence preserved)",
                     )
-                store.add_evidence(
-                    ev["field_path"],
-                    "interview",
-                    question_id=ev["question_id"],
-                    answer=ev["answer"],
+                # A whole-list answer grounds every item: record evidence per item so
+                # grounding, omission and re-indexing work at item level.
+                _base, index, _sub = parse_field_path(path)
+                new_val = get_by_path(clean, path)
+                rows = (
+                    [f"{path}[{i}]" for i in range(len(new_val))]
+                    if index is None and isinstance(new_val, list)
+                    else [path]
                 )
+                for row_path in rows:
+                    store.add_evidence(
+                        row_path, "interview", question_id=ev["question_id"], answer=ev["answer"]
+                    )
                 for c in store.list_conflicts("open"):
-                    if c["field_path"] == ev["field_path"]:
+                    if _descends(c["field_path"], path):
                         store.resolve_conflict(
                             c["field_path"], f"user answer (q {ev['question_id']}): {ev['answer']}"
                         )
-        store.set_counter("repair_attempts", 0)
+        _reset_repairs()
         version = store.save_draft(clean, "update")
         payload = _gap_payload(clean)
         event(
@@ -1178,10 +1452,12 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         try:
             parse_field_path(field_path)
         except FieldPathError as exc:
-            return _json({"ok": False, "error": str(exc)})
+            return _json({"ok": False, "error": str(exc), "error_code": "BAD_PATH"})
         fetched = store.fetched_urls()
         verified: list[dict[str, Any]] = []
-        for c in claims or []:
+        for c in claims if isinstance(claims, list) else []:
+            if not isinstance(c, dict):
+                continue
             try:
                 src = normalize_url(str(c.get("source_url", "")))
             except ValueError:
@@ -1201,6 +1477,7 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                 {
                     "ok": False,
                     "error": "a conflict needs at least two verifiable claims from fetched pages",
+                    "error_code": "INSUFFICIENT_CLAIMS",
                 }
             )
         store.upsert_conflict(field_path.strip(), verified, summary)
@@ -1221,7 +1498,15 @@ def make_tools(ctx: ToolContext) -> list[Any]:
         """Validate the latest draft, omit disputed unresolved claims, write company_brain.json
         plus evidence.json and report.md, and return the run summary. Call once at the end."""
         latest = store.latest_draft()
-        if latest is not None and store.get_counter("finalize_refusals") < MAX_FINALIZE_REFUSALS:
+        if latest is None:
+            return _json(
+                {
+                    "ok": False,
+                    "error": "no draft yet; call save_profile_draft first",
+                    "error_code": "NO_DRAFT",
+                }
+            )
+        if store.get_counter("finalize_refusals") < MAX_FINALIZE_REFUSALS:
             advice = _thin_draft_advice(latest[1], strict=True)
             ungrounded = ungrounded_paths(store, latest[1])
             if advice or ungrounded:
@@ -1230,6 +1515,7 @@ def make_tools(ctx: ToolContext) -> list[Any]:
                     {
                         "ok": False,
                         "error": "profile not ready to export",
+                        "error_code": "NOT_READY",
                         **({"advice": advice} if advice else {}),
                         **(
                             {
@@ -1278,74 +1564,127 @@ def ungrounded_paths(store: RunStore, profile: dict[str, Any]) -> list[str]:
     return list(grounding_report(profile, evidence_paths(store))["ungrounded"])
 
 
-def _omit_path(store: RunStore, data: dict[str, Any], path: str) -> None:
-    """Remove the value at `path` from the profile dict and keep evidence/conflict paths
-    consistent (list items are deleted and later indexes renumbered)."""
-    base, index, sub = parse_field_path(path)
-    current = get_by_path(data, path)
-    if current in ("", [], None):
-        return
-    if index is not None and (sub is None or sub == "name"):
+def _omit_many(
+    store: RunStore | None, data: dict[str, Any], paths: list[str]
+) -> list[tuple[str, int]]:
+    """Remove the values at `paths` from the profile dict, deterministically:
+
+    1. whole fields are blanked ("" / []);
+    2. feature sub-fields are blanked, except when the whole item (or its name) is omitted
+       too, in which case the item goes as a unit;
+    3. list items are deleted highest index first, and feature objects that became empty are
+       deleted the same way, so evidence/conflict paths can be renumbered consistently.
+
+    Returns the (base, removed_index) deletions in the order applied. They are applied to
+    `store` immediately when one is given; `finalize` passes None and applies them later in
+    one transaction after validation and the output write succeeded.
+    """
+    shifts: list[tuple[str, int]] = []
+    deletions: set[tuple[str, int]] = set()
+    sub_blanks: list[tuple[str, int, str]] = []
+    clears: list[str] = []
+    for p in sorted(set(paths)):
+        base, index, sub = parse_field_path(p)
+        if index is None:
+            clears.append(p)
+        elif sub is None or sub == "name":
+            deletions.add((base, index))
+        else:
+            sub_blanks.append((base, index, sub))
+    for p in clears:
+        current = get_by_path(data, p)
+        if current in ("", [], None):
+            continue
+        set_by_path(data, p, [] if isinstance(current, list) else "")
+    for base, index, sub in sub_blanks:
+        if (base, index) in deletions:
+            continue
+        item = get_by_path(data, f"{base}[{index}]")
+        if isinstance(item, dict):
+            item[sub] = ""
+    for i, feat in enumerate(get_by_path(data, FEATURE_LIST_PATH) or []):
+        if isinstance(feat, dict) and not any(feat.get(k) for k in FEATURE_FIELDS):
+            deletions.add((FEATURE_LIST_PATH, i))
+    by_base: dict[str, set[int]] = {}
+    for base, index in deletions:
+        by_base.setdefault(base, set()).add(index)
+    for base in sorted(by_base):
         lst = get_by_path(data, base)
-        if isinstance(lst, list) and index < len(lst):
+        if not isinstance(lst, list):
+            continue
+        for index in sorted(by_base[base], reverse=True):
+            if index >= len(lst):
+                continue
             del lst[index]
-            store.shift_list_paths(base, index)
-    elif sub is not None:
-        set_by_path(data, path, "")
-    elif isinstance(current, list):
-        set_by_path(data, path, [])
-    else:
-        set_by_path(data, path, "")
+            shifts.append((base, index))
+            if store is not None:
+                store.shift_list_paths(base, index)
+    return shifts
 
 
-def _omit_many(store: RunStore, data: dict[str, Any], paths: list[str]) -> None:
-    # Delete list items from the highest index down so earlier indexes stay valid.
-    def sort_key(p: str) -> tuple[str, int]:
-        base, index, _sub = parse_field_path(p)
-        return (base, -(index if index is not None else -1))
+def finalize(
+    ctx: ToolContext, *, forced_partial: bool = False, keep_status: bool = False
+) -> dict[str, Any]:
+    """Omit disputed/ungrounded values, validate, write the outputs and record the result.
 
-    for path in sorted(set(paths), key=sort_key):
-        _omit_path(store, data, path)
-
-
-def finalize(ctx: ToolContext, *, forced_partial: bool = False) -> dict[str, Any]:
+    All omissions are computed on a copy with an in-memory view of the evidence paths, so a
+    validation failure leaves the store untouched. The store mutations (warnings, conflict
+    statuses, evidence re-indexing, finalize draft, status) and the output write then run in
+    one transaction: a failed write rolls everything back and a re-export recomputes the
+    same omissions from the same state. `keep_status` exports an unfinished run (paused /
+    interrupted / running) without changing its status.
+    """
     store = ctx.store
     latest = store.latest_draft()
     if latest is None:
         raise FatalProfileError("no valid draft exists; nothing to export")
     _, profile = latest
     data = copy.deepcopy(profile)
+    ev_paths = evidence_paths(store)
+    warnings: list[tuple[str, str, dict[str, Any] | None]] = []
+    conflict_updates: list[tuple[str, str, str]] = []
 
     # 1. Unresolved conflicts: omit the disputed value once and mark the conflict so a later
     #    re-export does not delete a different item that moved into the same index.
-    disputed = [c["field_path"] for c in store.list_conflicts("open")]
-    for path in disputed:
-        if get_by_path(data, path) in ("", [], None):
-            store.set_conflict_status(path, "omitted", "value was already empty at export")
+    to_omit: list[str] = []
+    for c in store.list_conflicts("open"):
+        path = c["field_path"]
+        try:
+            current = get_by_path(data, path)
+        except (FieldPathError, KeyError, TypeError):
+            current = None
+        if current in ("", [], None):
+            conflict_updates.append((path, "omitted", "value was already empty at export"))
             continue
-        ctx.warn(
-            "CONFLICT_UNRESOLVED_OMITTED",
-            f"{path}: conflicting evidence was not resolved; value omitted",
+        warnings.append(
+            (
+                "CONFLICT_UNRESOLVED_OMITTED",
+                f"{path}: conflicting evidence was not resolved; value omitted",
+                None,
+            )
         )
-        store.set_conflict_status(path, "omitted", "omitted from the export (unresolved)")
-    _omit_many(store, data, disputed)
+        conflict_updates.append((path, "omitted", "omitted from the export (unresolved)"))
+        to_omit.append(path)
+    shifts = _omit_many(None, data, to_omit)
+    for base, index in shifts:
+        ev_paths = shift_path_set(ev_paths, base, index)
 
     # 2. Grounding: a populated field without accepted evidence is not exported.
-    ungrounded = ungrounded_paths(store, data)
+    ungrounded = list(grounding_report(data, ev_paths)["ungrounded"])
     if ungrounded:
-        ctx.warn(
-            "UNGROUNDED_OMITTED",
-            f"{len(ungrounded)} populated field(s) had no accepted evidence and were omitted: "
-            + ", ".join(ungrounded[:12]),
+        warnings.append(
+            (
+                "UNGROUNDED_OMITTED",
+                f"{len(ungrounded)} populated field(s) had no accepted evidence and were omitted: "
+                + ", ".join(ungrounded[:12]),
+                None,
+            )
         )
-        _omit_many(store, data, ungrounded)
+        more = _omit_many(None, data, ungrounded)
+        for base, index in more:
+            ev_paths = shift_path_set(ev_paths, base, index)
+        shifts.extend(more)
 
-    feats = data.get("product", {}).get("features_and_capabilities", [])
-    data["product"]["features_and_capabilities"] = [
-        f
-        for f in feats
-        if any(f.get(k) for k in ("name", "description", "how_it_works", "customer_benefit"))
-    ]
     try:
         brain = CompanyBrain.model_validate(data)
     except ValidationError as exc:
@@ -1355,12 +1694,26 @@ def finalize(ctx: ToolContext, *, forced_partial: bool = False) -> dict[str, Any
     clean = brain.model_dump(mode="json")
     budget = ctx.settings.budget_usd
     over_budget = budget is not None and store.total_cost() >= budget
-    status = (
-        "partial" if (forced_partial or over_budget or not store.fetched_urls()) else "complete"
-    )
-    output_path = write_outputs(ctx.run_dir, store, clean, status)
-    store.save_draft(clean, "finalize")
-    store.set_status(status, str(output_path))
+    no_pages = not store.fetched_urls()
+    if no_pages and not store.has_warning("NO_USABLE_PAGES"):
+        message, details = no_usable_pages_message(store)
+        warnings.append(("NO_USABLE_PAGES", message, details))
+    status = "partial" if (forced_partial or over_budget or no_pages) else "complete"
+
+    # 3. Commit: store mutations and the output write succeed or fail together.
+    with store.transaction():
+        for code, message, details in warnings:
+            ctx.warn(code, message, **(details or {}))
+        for path, cstatus, resolution in conflict_updates:
+            store.set_conflict_status(path, cstatus, resolution)
+        for base, index in shifts:
+            store.shift_list_paths(base, index)
+        output_path = write_outputs(ctx.run_dir, store, clean, status)
+        store.save_draft(clean, "finalize")
+        if keep_status:
+            store.set_output_path(str(output_path))
+        else:
+            store.set_status(status, str(output_path))
     grounding = grounding_report(clean, evidence_paths(store))
     pending = store.pending_question()
     summary = {

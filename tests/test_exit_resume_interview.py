@@ -136,13 +136,31 @@ def test_skip_and_idk_are_recorded_as_unresolved(settings, acme_fixtures):
 
 
 def test_non_interactive_mode_skips_everything(settings, acme_fixtures):
-    runner, _, _ = make_runner(
-        settings, two_question_steps(), scraper=FixtureScraper(acme_fixtures), non_interactive=True
+    steps = two_question_steps()
+    seen: list[dict] = []
+
+    def after_q1(messages):
+        # like apply_second: branch on the status instead of applying a SKIPPED marker
+        res = last_tool_result(messages)
+        seen.append(res)
+        if res.get("status") == "answered":
+            return steps[4](messages)
+        return steps[5]
+
+    steps[4] = after_q1
+    runner, _, asked = make_runner(
+        settings, steps, scraper=FixtureScraper(acme_fixtures), non_interactive=True
     )
     outcome = runner.start(f"{SITE}/")
     assert outcome.status == "complete"
+    assert asked == []  # the terminal was never consulted
+    assert seen[0]["status"] == "skipped" and seen[0]["answer"] == "SKIPPED"
     store = RunStore(settings.runs_dir / outcome.run_id)
-    assert all(q["status"] == "skipped" for q in store.list_questions())
+    assert [q["status"] for q in store.list_questions()] == ["skipped", "skipped"]
+    assert store.questions_asked() == 2
+    brain = json.loads((store.run_dir / "company_brain.json").read_text())
+    assert brain["customer"]["target_customer"].startswith("Startups")  # untouched by SKIPPED
+    assert brain["customer"]["buyers"] == []
 
 
 def test_question_limit_is_enforced(settings, acme_fixtures):
@@ -151,7 +169,7 @@ def test_question_limit_is_enforced(settings, acme_fixtures):
 
     def after_q2(messages):
         res = last_tool_result(messages)
-        assert res["ok"] is False and "limit" in res["error"]
+        assert res["ok"] is False and res["error_code"] == "QUESTION_LIMIT"
         return tool_call("finalize_profile", {})
 
     steps[6] = after_q2

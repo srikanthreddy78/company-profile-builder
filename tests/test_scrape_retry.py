@@ -42,6 +42,8 @@ def test_429_then_success_is_retried_and_logged(settings, acme_fixtures):
     assert f"{SITE}/customers" in store.fetched_urls()
     scrape_calls = [c for c in scraper.calls if c == ("scrape", f"{SITE}/product")]
     assert len(scrape_calls) == 3  # first attempt + 2 retries
+    # the other URL in the batch was fetched during the first attempt and never re-fetched
+    assert len([c for c in scraper.calls if c == ("scrape", f"{SITE}/customers")]) == 1
     events = read_events(store.run_dir)
     tool_attempts = [
         e["attempt"]

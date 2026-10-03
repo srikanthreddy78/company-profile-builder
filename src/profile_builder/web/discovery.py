@@ -51,6 +51,7 @@ class DiscoveryResult:
     total_seen: int = 0
     dropped: int = 0
     notes: list[str] = field(default_factory=list)
+    homepage_error: PermanentScrapeError | None = None  # 404/403/402...: recorded, not fatal
 
 
 def _safe_normalize(url: str) -> str | None:
@@ -125,14 +126,20 @@ def discover(
     homepage: ScrapedPage | None = None,
 ) -> DiscoveryResult:
     """Transient errors propagate (so the retry middleware can retry); permanent map
-    failures fall back to homepage links."""
+    failures fall back to homepage links, and a permanent homepage failure (404/403/402) is
+    reported in `homepage_error` while the map candidates are still returned."""
     notes: list[str] = []
     raw: list[LinkCandidate] = []
     source = "none"
+    homepage_error: PermanentScrapeError | None = None
     # Always start from the homepage: it is the best single page about positioning and its
     # links supplement (or replace) the site map. Transient errors propagate for retry.
     if homepage is None:
-        homepage = scraper.scrape(start_url, timeout_ms=timeout_ms, with_links=True)
+        try:
+            homepage = scraper.scrape(start_url, timeout_ms=timeout_ms, with_links=True)
+        except PermanentScrapeError as exc:
+            homepage_error = exc
+            notes.append(f"homepage unavailable ({exc.code}); relying on the site map")
     try:
         raw = list(scraper.map(start_url, limit=DISCOVERY_MAP_LIMIT, timeout_ms=timeout_ms))
         if raw:
@@ -142,7 +149,7 @@ def discover(
     known = {_safe_normalize(c.url) for c in raw if c.url} - {None}
     homepage_links = [
         LinkCandidate(url=u)
-        for u in (homepage.links or [])
+        for u in ((homepage.links if homepage is not None else None) or [])
         if u and _safe_normalize(u) not in known | {None}
     ]
     if homepage_links:
@@ -151,9 +158,15 @@ def discover(
     if not raw:
         notes.append(
             "no site map and the homepage exposed no links; only the start URL is available"
+            if homepage_error is None
+            else "no site map and the homepage could not be fetched; no pages are available"
         )
-    raw.insert(0, LinkCandidate(url=start_url, title="Homepage"))
+    if homepage_error is None:
+        raw.insert(0, LinkCandidate(url=start_url, title="Homepage"))
     candidates, dropped = filter_and_score(raw, start_url, check_dns=check_dns)
+    if homepage_error is not None:
+        start_norm = _safe_normalize(start_url)
+        candidates = [c for c in candidates if c.url != start_norm]
     return DiscoveryResult(
         candidates=candidates[:max_candidates],
         source=source,
@@ -161,4 +174,5 @@ def discover(
         total_seen=len(raw),
         dropped=dropped,
         notes=notes,
+        homepage_error=homepage_error,
     )

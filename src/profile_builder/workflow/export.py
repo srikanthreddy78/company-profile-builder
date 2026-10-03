@@ -42,6 +42,9 @@ def build_evidence_document(
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "tool_version": APP_VERSION,
         "status": status,
+        # True when no page could be fetched: every exported claim then rests on the
+        # interview alone (the run is always labeled partial in that case).
+        "interview_only": not store.fetched_urls(),
         "start_url": run.start_url,
         "product_focus": run.product_focus,
         "settings": run.settings,

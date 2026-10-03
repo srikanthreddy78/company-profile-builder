@@ -143,7 +143,7 @@ def test_user_answer_survives_later_draft_and_blocks_website_override(settings, 
     outcome = runner.start(f"{SITE}/")
     assert outcome.status == "complete"
     assert "customer.target_customer" in results[0]["protected_by_user_answers"]
-    assert results[1]["rejected"] and "user answer" in results[1]["rejected"][0]["reason"]
+    assert results[1]["rejected"][0]["reason_code"] == "USER_ANSWER_PROTECTED"
     store = RunStore(settings.runs_dir / outcome.run_id)
     brain = json.loads((store.run_dir / "company_brain.json").read_text())
     assert brain["customer"]["target_customer"] == "Only banks"
@@ -264,6 +264,7 @@ def test_partial_run_resumes_with_higher_budget(settings, acme_fixtures):
     runner1, model1, _ = make_runner(tight, steps, scraper=scraper, answers=["Only banks"])
     outcome1 = runner1.start(f"{SITE}/")
     assert outcome1.status == "partial", outcome1
+    assert "--budget-usd" in (outcome1.resume_hint or ""), outcome1  # README promises a hint
     store = RunStore(tight.runs_dir / outcome1.run_id)
     assert store.has_warning("BUDGET_EXCEEDED")
     used = model1.cursor
@@ -284,34 +285,55 @@ def test_http_503_page_is_refetched_later(settings, acme_fixtures):
         acme_fixtures,
         failures={f"{SITE}/product": [TransientScrapeError("503", code="HTTP_503")] * 3},
     )
+    missing = f"{SITE}/does-not-exist"
+    seen: list[dict] = []
+
+    def after_first_scrape(messages):
+        # retries exhausted: the page is recorded as a *transient* failure, not given up on
+        store = RunStore(next(settings.runs_dir.glob("pb-*")))
+        rec = store.get_page(f"{SITE}/product")
+        assert rec is not None and rec.status == "failed" and rec.error_code == "HTTP_503"
+        assert store.get_page(missing).error_code == "HTTP_404"
+        seen.append(last_tool_result(messages))
+        return tool_call("scrape_pages", {"urls": [f"{SITE}/product", missing]})
+
+    def after_second_scrape(messages):
+        seen.append(last_tool_result(messages))
+        return AIMessage(content="done")
+
     steps = [
-        *_prefix(),
-        tool_call("scrape_pages", {"urls": [f"{SITE}/product"]}, "again"),
-        AIMessage(content="done"),
+        tool_call("discover_pages", {"start_url": f"{SITE}/"}),
+        tool_call("scrape_pages", {"urls": [f"{SITE}/product", missing, f"{SITE}/customers"]}),
+        after_first_scrape,
+        after_second_scrape,
         AIMessage(content="done"),
     ]
     runner, _, _ = make_runner(settings, steps, scraper=scraper)
     outcome = runner.start(f"{SITE}/")
     store = RunStore(settings.runs_dir / outcome.run_id)
     assert f"{SITE}/product" in store.fetched_urls()
+    assert seen[0]["_status"] == "error"  # the retried call ended as a tool error
+    by_url = {r.get("url"): r for r in seen[1]["results"]}
+    assert by_url[f"{SITE}/product"]["status"] == "fetched"
+    assert by_url[missing]["status"] == "failed" and by_url[missing]["error_code"] == "HTTP_404"
+    assert "already failed" in by_url[missing]["error"]
+    # the batch was not starved by the failing URL: customers was fetched in the first call
+    assert len([c for c in scraper.calls if c == ("scrape", f"{SITE}/customers")]) == 1
+    assert len([c for c in scraper.calls if c == ("scrape", missing)]) == 1
 
 
 # 7. page budget counts unique scrapes; discovery reuses the cached homepage ----------------
 
 
-def test_duplicates_count_toward_budget_and_homepage_fetched_once(settings, acme_fixtures):
+def test_duplicates_count_toward_budget_and_homepage_fetched_once(settings, acme_fixtures_mutable):
+    from profile_builder.security import url_cache_name
+
     dup = f"{SITE}/about-copy"
     about_page = ScrapedPage.from_json(
-        (
-            acme_fixtures
-            / "pages"
-            / __import__("profile_builder.security", fromlist=["url_cache_name"]).url_cache_name(
-                f"{SITE}/about"
-            )
-        ).read_text()
+        (acme_fixtures_mutable / "pages" / url_cache_name(f"{SITE}/about")).read_text()
     )
     FixtureScraper.write_page(
-        acme_fixtures,
+        acme_fixtures_mutable,
         ScrapedPage(
             url=dup,
             final_url=dup,
@@ -321,10 +343,10 @@ def test_duplicates_count_toward_budget_and_homepage_fetched_once(settings, acme
         ),
     )
     small = settings.model_copy(update={"max_pages": 3})
-    scraper = FixtureScraper(acme_fixtures)
+    scraper = FixtureScraper(acme_fixtures_mutable)
     steps = [
         tool_call("discover_pages", {"start_url": f"{SITE}/"}),
-        tool_call("discover_pages", {"start_url": f"{SITE}/"}, "d2"),
+        tool_call("discover_pages", {"start_url": f"{SITE}/"}),
         tool_call("scrape_pages", {"urls": [f"{SITE}/about", dup, f"{SITE}/product"]}),
         AIMessage(content="done"),
         AIMessage(content="done"),
@@ -411,4 +433,4 @@ def test_model_call_events_carry_real_stages(settings, acme_fixtures):
         for e in read_events(settings.runs_dir / outcome.run_id)
         if e.get("event") == "model_call"
     }
-    assert stages - {"init"}, stages
+    assert {"discover", "scrape", "draft"} <= stages, stages

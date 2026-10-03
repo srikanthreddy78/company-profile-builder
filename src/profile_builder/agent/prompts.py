@@ -21,6 +21,11 @@ content agents, so every statement must be supported by website evidence or by t
   questions (including follow-ups). The tools enforce these; respect their responses.
 - Every populated field needs evidence: a verbatim excerpt (copied exactly) from a scraped page
   with its URL, or an interview answer. Evidence that is not verbatim is rejected.
+- Cite list items ONE BY ONE: for `customer.buyers`, `customer.use_cases`, `differentiators`,
+  `features_and_capabilities` etc. give one evidence item per list entry using its index
+  ("customer.use_cases[1]", "product.features_and_capabilities[0]"). An excerpt cited for a
+  whole list only grounds the entries it actually mentions; the others are reported as
+  ungrounded and omitted at export.
 
 ## Workflow
 1. `discover_pages` → review the scored candidates and pick the pages most likely to explain the

@@ -11,7 +11,12 @@ from profile_builder.security import SecurityError, detect_injection, validate_r
 from profile_builder.state.run_store import RunStore
 from profile_builder.web.discovery import filter_and_score
 from profile_builder.web.robots import RobotsChecker
-from profile_builder.web.scraper import FixtureScraper, LinkCandidate
+from profile_builder.web.scraper import (
+    FixtureScraper,
+    LinkCandidate,
+    PermanentScrapeError,
+    TransientScrapeError,
+)
 from profile_builder.web.url_guard import URLGuardError, registrable_domain, same_site, validate_url
 from tests.conftest import (
     DRAFT_EVIDENCE,
@@ -29,7 +34,7 @@ PUBLIC = ["93.184.216.34"]
 # --- H1: final URL comes from the engine, and off-site redirects are rejected -------------
 
 
-def test_firecrawl_scraper_uses_engine_final_url(monkeypatch):
+def _fake_firecrawl(status_code: int):
     from profile_builder.web import scraper as sc
 
     class FakeClient:
@@ -38,7 +43,7 @@ def test_firecrawl_scraper_uses_engine_final_url(monkeypatch):
                 markdown="x" * 200,
                 links=[],
                 metadata=SimpleNamespace(
-                    status_code=200,
+                    status_code=status_code,
                     source_url=url,
                     url="https://evil.example.net/landing",
                     title="T",
@@ -46,19 +51,40 @@ def test_firecrawl_scraper_uses_engine_final_url(monkeypatch):
                 ),
             )
 
-    monkeypatch.setattr(sc, "Firecrawl", lambda **kw: FakeClient(), raising=False)
     s = sc.FirecrawlScraper.__new__(sc.FirecrawlScraper)
     s._client = FakeClient()
-    page = s.scrape("https://acme-example.com/page", timeout_ms=1000)
+    return s
+
+
+def test_firecrawl_scraper_uses_engine_final_url():
+    page = _fake_firecrawl(200).scrape("https://acme-example.com/page", timeout_ms=1000)
     assert page.final_url == "https://evil.example.net/landing"
 
 
-def test_offsite_redirect_is_rejected_in_process_page(settings, acme_fixtures):
+@pytest.mark.parametrize(
+    ("status", "exc_type", "code"),
+    [
+        (404, PermanentScrapeError, "HTTP_404"),
+        (403, PermanentScrapeError, "HTTP_403"),
+        (429, TransientScrapeError, "HTTP_429"),
+        (503, TransientScrapeError, "HTTP_503"),
+        (408, TransientScrapeError, "HTTP_408"),
+    ],
+)
+def test_firecrawl_metadata_status_is_classified(status, exc_type, code):
+    with pytest.raises(exc_type) as info:
+        _fake_firecrawl(status).scrape("https://acme-example.com/page", timeout_ms=1000)
+    assert info.value.code == code
+    if exc_type is PermanentScrapeError:
+        assert info.value.http_status == status
+
+
+def test_offsite_redirect_is_rejected_in_process_page(settings, acme_fixtures_mutable):
     from profile_builder.web.scraper import ScrapedPage
 
     evil = f"{SITE}/redirect-me"
     FixtureScraper.write_page(
-        acme_fixtures,
+        acme_fixtures_mutable,
         ScrapedPage(
             url=evil,
             final_url="https://attacker.example.net/",
@@ -72,11 +98,14 @@ def test_offsite_redirect_is_rejected_in_process_page(settings, acme_fixtures):
         AIMessage(content="stop"),
         AIMessage(content="stop"),
     ]
-    runner, _, _ = make_runner(settings, steps, scraper=FixtureScraper(acme_fixtures))
+    runner, _, _ = make_runner(settings, steps, scraper=FixtureScraper(acme_fixtures_mutable))
     outcome = runner.start(f"{SITE}/")
     store = RunStore(settings.runs_dir / outcome.run_id)
     assert store.has_warning("REDIRECT_OFFSITE")
     assert evil not in store.fetched_urls()
+    assert store.get_page(evil).error_code == "REDIRECT_OFFSITE"
+    # nothing was fetched at all → clean failure with the NO_USABLE_PAGES diagnosis
+    assert outcome.status == "failed" and store.has_warning("NO_USABLE_PAGES")
 
 
 # --- H2: no default subagent / task tool ------------------------------------------------
@@ -168,14 +197,25 @@ def test_evidence_must_mention_value_and_interview_evidence_is_scoped(settings, 
             },
         )
 
+    results: list[dict] = []
+
+    def record_draft(messages):
+        results.append(last_tool_result(messages))
+        return tool_call("ask_user", q)
+
+    def record_updates(messages):
+        results.append(last_tool_result(messages))
+        return tool_call("finalize_profile", {})
+
     steps = [
         tool_call("discover_pages", {"start_url": f"{SITE}/"}),
         tool_call(
             "scrape_pages", {"urls": [f"{SITE}/product", f"{SITE}/customers", f"{SITE}/about"]}
         ),
         tool_call("save_profile_draft", {"profile": DRAFT_PROFILE, "evidence": bad_evidence}),
-        tool_call("ask_user", q),
+        record_draft,
         apply,
+        record_updates,
         *finalize_steps(),
     ]
     runner, _, _ = make_runner(
@@ -187,10 +227,27 @@ def test_evidence_must_mention_value_and_interview_evidence_is_scoped(settings, 
     outcome = runner.start(f"{SITE}/")
     assert outcome.status == "complete"
     store = RunStore(settings.runs_dir / outcome.run_id)
-    reasons = " ".join(
-        w["message"] for w in store.list_warnings() if w["code"] == "EVIDENCE_REJECTED"
-    )
-    assert "does not mention the field value" in reasons and "too short" in reasons
+    draft_rejections = {
+        (r["field_path"], r["reason_code"]) for r in results[0]["evidence_rejected"]
+    }
+    assert draft_rejections == {
+        ("company.name", "NOT_VERBATIM"),
+        ("customer.desired_outcomes", "NO_OVERLAP"),
+        ("product.name", "TOO_SHORT"),
+    }
+    # the warnings carry the same machine-readable code
+    codes = {
+        (w["details"]["field_path"], w["details"]["reason_code"])
+        for w in store.list_warnings()
+        if w["code"] == "EVIDENCE_REJECTED"
+    }
+    assert codes == draft_rejections
+    update_rejections = {(r["field_path"], r["reason_code"]) for r in results[1]["rejected"]}
+    assert update_rejections == {
+        ("customer.buyers", "QUESTION_SCOPE"),
+        ("customer.target_customer", "ANSWER_MISMATCH"),
+    }
+    assert results[1]["applied"] == ["customer.target_customer"]
     rows = [e for e in store.list_evidence(include_superseded=False)]
     assert not any(
         e["field_path"] == "customer.desired_outcomes" and "Founded" in (e["excerpt"] or "")

@@ -339,10 +339,29 @@ def strip_unknown_keys(data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]
     return out, dropped
 
 
+def _require_all_properties(node: Any) -> None:
+    """Every object schema lists all of its properties as required: the contract always
+    emits every key (unknowns are "" / []), so consumers can rely on their presence."""
+    if not isinstance(node, dict):
+        return
+    if node.get("type") == "object" and isinstance(node.get("properties"), dict):
+        node["required"] = list(node["properties"])
+    for key in ("properties", "$defs"):
+        for child in (node.get(key) or {}).values():
+            _require_all_properties(child)
+    for key in ("items", "additionalProperties"):
+        if isinstance(node.get(key), dict):
+            _require_all_properties(node[key])
+    for key in ("anyOf", "oneOf", "allOf"):
+        for child in node.get(key) or []:
+            _require_all_properties(child)
+
+
 def json_schema() -> dict[str, Any]:
     schema = CompanyBrain.model_json_schema()
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
     schema["title"] = "company_brain"
+    _require_all_properties(schema)
     return schema
 
 

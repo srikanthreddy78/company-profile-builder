@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+env:
+  UV_FROZEN: "1"
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -23,6 +26,6 @@ jobs:
           uv run python -m profile_builder schema --out /tmp/schema.json
           diff -q /tmp/schema.json schema/company_brain.schema.json
       - name: Tests (offline, no API keys)
-        run: uv run pytest -q
+        run: uv run pytest -q --cov=profile_builder --cov-fail-under=85
       - name: Dependency audit (advisory)
         run: uv run pip-audit --strict || echo "::warning::pip-audit reported findings"

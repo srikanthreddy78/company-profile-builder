@@ -33,7 +33,13 @@
         }
       },
       "title": "Brand",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "voice_and_tone",
+        "writing_style",
+        "preferred_terms",
+        "terms_or_claims_to_avoid"
+      ]
     },
     "Company": {
       "additionalProperties": false,
@@ -50,7 +56,11 @@
         }
       },
       "title": "Company",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "name",
+        "website_url"
+      ]
     },
     "ContentEvidence": {
       "additionalProperties": false,
@@ -85,7 +95,13 @@
         }
       },
       "title": "ContentEvidence",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "customer_stories",
+        "company_expertise",
+        "product_evidence",
+        "proprietary_insights_or_examples"
+      ]
     },
     "Customer": {
       "additionalProperties": false,
@@ -139,7 +155,16 @@
         }
       },
       "title": "Customer",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "target_customer",
+        "buyers",
+        "users",
+        "problems",
+        "use_cases",
+        "desired_outcomes",
+        "existing_alternatives"
+      ]
     },
     "FeatureCapability": {
       "additionalProperties": false,
@@ -166,7 +191,13 @@
         }
       },
       "title": "FeatureCapability",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "name",
+        "description",
+        "how_it_works",
+        "customer_benefit"
+      ]
     },
     "Product": {
       "additionalProperties": false,
@@ -202,7 +233,14 @@
         }
       },
       "title": "Product",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "name",
+        "description",
+        "positioning",
+        "features_and_capabilities",
+        "differentiators"
+      ]
     }
   },
   "additionalProperties": false,
@@ -237,5 +275,14 @@
   },
   "title": "company_brain",
   "type": "object",
-  "$schema": "https://json-schema.org/draft/2020-12/schema"
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "required": [
+    "artifact",
+    "version",
+    "company",
+    "product",
+    "customer",
+    "content_evidence",
+    "brand"
+  ]
 }

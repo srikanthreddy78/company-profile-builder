@@ -1,51 +1,76 @@
 """Shared test harness: a scripted chat model (predetermined tool calls), a synthetic
-fixture website, deterministic embeddings, and a Runner factory wired for offline use."""
+fixture website, deterministic embeddings, and a Runner factory wired for offline use.
+
+Every test runs offline: an autouse fixture makes DNS lookups and HTTP requests fail loudly,
+and the working directory is a temp dir so the repo's ``.env`` is never read."""
 
 from __future__ import annotations
 
+import itertools
 import json
+import shutil
+import socket
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 import pytest
+import requests
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
+from pydantic import Field
 from rich.console import Console
 
 from profile_builder.config import Settings
 from profile_builder.retrieval.index import HashEmbeddings
+from profile_builder.web.robots import RobotsChecker
 from profile_builder.web.scraper import FixtureScraper, LinkCandidate, ScrapedPage
 from profile_builder.workflow.runner import Runner
 
 Step = AIMessage | Callable[[list[BaseMessage]], AIMessage]
 
+_CALL_IDS = itertools.count(1)
+
 
 def tool_call(name: str, args: dict[str, Any], call_id: str | None = None) -> AIMessage:
-    """An AIMessage containing exactly one tool call."""
+    """An AIMessage containing exactly one tool call (ids are unique and deterministic)."""
     return AIMessage(
         content="",
-        tool_calls=[
-            {
-                "name": name,
-                "args": args,
-                "id": call_id
-                or f"call_{name}_{abs(hash(json.dumps(args, sort_keys=True, default=str))) % 10_000_000}",
-            }
-        ],
+        tool_calls=[{"name": name, "args": args, "id": call_id or f"call_{next(_CALL_IDS)}"}],
     )
 
 
 def last_tool_result(messages: list[BaseMessage]) -> dict[str, Any]:
-    """Parse the JSON payload of the most recent ToolMessage (stripping untrusted framing)."""
+    """Parse the JSON payload of the ToolMessage answering the last AIMessage's tool call
+    (stripping untrusted framing). Non-JSON tool output (error messages) is returned as
+    ``{"_raw": content, "_status": status}``."""
+    last_ai = next(
+        (m for m in reversed(messages) if isinstance(m, AIMessage) and m.tool_calls), None
+    )
+    wanted = last_ai.tool_calls[-1]["id"] if last_ai else None
     for m in reversed(messages):
-        if isinstance(m, ToolMessage):
+        if isinstance(m, ToolMessage) and (wanted is None or m.tool_call_id == wanted):
             text = m.content if isinstance(m.content, str) else json.dumps(m.content)
             lines = [ln for ln in text.splitlines() if not ln.startswith("<<<")]
-            return json.loads("\n".join(lines))
-    raise AssertionError("no ToolMessage found")
+            try:
+                return json.loads("\n".join(lines))
+            except ValueError:
+                return {"_raw": text, "_status": m.status}
+    raise AssertionError(f"no ToolMessage found for tool call {wanted!r}")
+
+
+class ScriptExhausted(BaseException):
+    """Raised when the script runs out of steps: a BaseException so no retry middleware or
+    generic ``except Exception`` in the runner can swallow it."""
+
+
+def _tool_name(t: Any) -> str | None:
+    if isinstance(t, dict):
+        fn = t.get("function") if isinstance(t.get("function"), dict) else None
+        return (fn or t).get("name")
+    return getattr(t, "name", None) or getattr(t, "__name__", None)
 
 
 class ScriptedChatModel(BaseChatModel):
@@ -57,6 +82,7 @@ class ScriptedChatModel(BaseChatModel):
     calls: int = 0
     fail_first_n: int = 0  # raise an exception on the first N calls (retry tests)
     failure: Exception | None = None
+    bound_tools: set[str] = Field(default_factory=set)
 
     @property
     def _llm_type(self) -> str:
@@ -65,6 +91,7 @@ class ScriptedChatModel(BaseChatModel):
     def bind_tools(
         self, tools: Sequence[Any], *, tool_choice: Any = None, **kwargs: Any
     ) -> BaseChatModel:
+        self.bound_tools.update(n for n in (_tool_name(t) for t in tools) if n)
         return self
 
     def _generate(
@@ -79,10 +106,15 @@ class ScriptedChatModel(BaseChatModel):
             self.fail_first_n -= 1
             raise self.failure or RuntimeError("scripted model failure")
         if self.cursor >= len(self.steps):
-            raise AssertionError(f"scripted model exhausted after {len(self.steps)} steps")
+            raise ScriptExhausted(f"scripted model exhausted after {len(self.steps)} steps")
         step = self.steps[self.cursor]
         self.cursor += 1
         msg = step(messages) if callable(step) else step
+        for tc in msg.tool_calls or []:
+            assert tc["name"] in self.bound_tools, (
+                f"scripted tool call {tc['name']!r} is not bound to the model "
+                f"(bound: {sorted(self.bound_tools)})"
+            )
         msg = msg.model_copy(
             update={
                 "usage_metadata": {"input_tokens": 1000, "output_tokens": 100, "total_tokens": 1100}
@@ -167,9 +199,7 @@ PAGES: dict[str, tuple[str, str]] = {
 }
 
 
-@pytest.fixture(scope="session")
-def acme_fixtures(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    root = tmp_path_factory.mktemp("acme")
+def write_acme_site(root: Path) -> Path:
     for url, (title, md) in PAGES.items():
         FixtureScraper.write_page(
             root,
@@ -192,6 +222,36 @@ def acme_fixtures(tmp_path_factory: pytest.TempPathFactory) -> Path:
         ],
     )
     return root
+
+
+@pytest.fixture(scope="session")
+def acme_fixtures(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Read-only fixture site shared by the whole session. Tests that add pages must use
+    ``acme_fixtures_mutable``."""
+    return write_acme_site(tmp_path_factory.mktemp("acme"))
+
+
+@pytest.fixture
+def acme_fixtures_mutable(acme_fixtures: Path, tmp_path: Path) -> Path:
+    """A private copy of the fixture site for tests that write new pages or remove files."""
+    target = tmp_path / "acme-mutable"
+    shutil.copytree(acme_fixtures, target)
+    return target
+
+
+@pytest.fixture(autouse=True)
+def _offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """No network, no repo .env: DNS and HTTP raise; cwd is a scratch dir."""
+
+    def _no_network(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("network access is not allowed in tests")
+
+    monkeypatch.setattr(socket, "getaddrinfo", _no_network)
+    monkeypatch.setattr(requests.Session, "get", _no_network)
+    monkeypatch.setattr(requests.Session, "request", _no_network)
+    monkeypatch.setattr(requests, "get", _no_network)
+    monkeypatch.setattr(requests, "request", _no_network)
+    monkeypatch.chdir(tmp_path)
 
 
 @pytest.fixture(autouse=True)
@@ -224,9 +284,11 @@ def make_runner(
     answers: list[str] | None = None,
     model: ScriptedChatModel | None = None,
     non_interactive: bool = False,
+    embeddings: Any = None,
     **kwargs: Any,
 ) -> tuple[Runner, ScriptedChatModel, list[str]]:
     model = model or ScriptedChatModel(steps=steps)
+    embeddings = embeddings if embeddings is not None else HashEmbeddings()
     queue = list(answers or [])
     asked: list[str] = []
 
@@ -242,10 +304,11 @@ def make_runner(
         Console(record=True, width=120, force_terminal=False, no_color=True),
         model_factory=lambda s: model,
         scraper_factory=lambda s: scraper,
-        embeddings_factory=lambda s: HashEmbeddings(),
+        embeddings_factory=lambda s: embeddings,
         input_fn=input_fn,
         non_interactive=non_interactive,
         check_dns=False,
+        robots=RobotsChecker(enabled=False),
         **kwargs,
     )
     return runner, model, asked
@@ -307,6 +370,8 @@ DRAFT_PROFILE: dict[str, Any] = {
     },
 }
 
+# Each entry yields exactly one accepted evidence row (list items are cited per item, or
+# the list has a single item), except the deliberately fabricated last one.
 DRAFT_EVIDENCE: list[dict[str, str]] = [
     {
         "field_path": "product.name",
@@ -354,9 +419,14 @@ DRAFT_EVIDENCE: list[dict[str, str]] = [
         "excerpt": "so even cloud providers cannot read it",
     },
     {
-        "field_path": "customer.use_cases",
+        "field_path": "customer.use_cases[0]",
         "source_url": f"{SITE}/customers",
         "excerpt": "moving fraud analytics into Acme Vault enclaves",
+    },
+    {
+        "field_path": "customer.use_cases[1]",
+        "source_url": f"{SITE}/customers",
+        "excerpt": "Contoso Health shares patient data with research partners",
     },
     {
         "field_path": "customer.desired_outcomes",
@@ -395,6 +465,25 @@ DRAFT_EVIDENCE: list[dict[str, str]] = [
         "excerpt": "Acme is the market leader in everything",
     },
 ]
+FABRICATED_EVIDENCE_PATHS = {"company.name"}
+
+
+def expected_website_rows(evidence: list[dict[str, str]] = DRAFT_EVIDENCE) -> set[str]:
+    """Evidence row paths the draft evidence must produce: list citations are stored per
+    item, so a base-level citation of a single-item list becomes ``base[0]``."""
+    from profile_builder.schema import STRING_PATHS, get_by_path
+
+    out: set[str] = set()
+    for e in evidence:
+        path = e["field_path"]
+        if path in FABRICATED_EVIDENCE_PATHS:
+            continue
+        if path in STRING_PATHS or "[" in path:
+            out.add(path)
+        else:
+            out.update(f"{path}[{i}]" for i in range(len(get_by_path(DRAFT_PROFILE, path))))
+    return out
+
 
 CONFLICT_QUESTION = {
     "question": "The homepage says Acme serves startups and enterprises, but the customers page only shows Fortune 500 banks and healthcare networks. Which segment should this profile prioritize?",
@@ -410,11 +499,11 @@ def finalize_steps() -> list[Step]:
     def retry_if_refused(messages: list[BaseMessage]) -> AIMessage:
         res = last_tool_result(messages)
         if res.get("ok") is False:
-            return tool_call("finalize_profile", {}, "finalize_retry")
+            return tool_call("finalize_profile", {})
         return AIMessage(content="Profile exported.")
 
     return [
-        tool_call("finalize_profile", {}, "finalize_first"),
+        tool_call("finalize_profile", {}),
         retry_if_refused,
         AIMessage(content="Profile exported."),
     ]

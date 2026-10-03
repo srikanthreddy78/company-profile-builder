@@ -10,9 +10,9 @@ from profile_builder.schema import (
     FEATURE_LIST_PATH,
     STRING_LIST_PATHS,
     STRING_PATHS,
-    ancestors,
     get_by_path,
     iter_leaf_paths,
+    parse_field_path,
 )
 
 # Higher = more important to resolve via interview. Fields affecting product scope,
@@ -113,8 +113,19 @@ def empty_gaps(profile: dict[str, Any]) -> list[Gap]:
 ALWAYS_GROUNDED_PATHS = frozenset({"company.website_url"})  # provided as run input, not a claim
 
 
+def covering_paths(path: str) -> list[str]:
+    """Evidence rows that ground the leaf at `path`: the leaf itself, and for a feature
+    sub-field also the feature item (`base[i]`). A row on a bare list base grounds nothing:
+    every list item needs its own `base[i]` row (evidence is verified per item)."""
+    base, index, sub = parse_field_path(path)
+    out = [path]
+    if sub is not None:
+        out.append(f"{base}[{index}]")
+    return out
+
+
 def grounding_report(profile: dict[str, Any], evidence_paths: set[str]) -> dict[str, Any]:
-    """Count populated leaves and how many have evidence (own path or an ancestor path)."""
+    """Count populated leaves and how many have evidence (own path or a covering path)."""
     populated = 0
     grounded = 0
     ungrounded: list[str] = []
@@ -122,7 +133,7 @@ def grounding_report(profile: dict[str, Any], evidence_paths: set[str]) -> dict[
         if value in ("", [], None):
             continue
         populated += 1
-        if path in ALWAYS_GROUNDED_PATHS or any(a in evidence_paths for a in ancestors(path)):
+        if path in ALWAYS_GROUNDED_PATHS or any(a in evidence_paths for a in covering_paths(path)):
             grounded += 1
         else:
             ungrounded.append(path)

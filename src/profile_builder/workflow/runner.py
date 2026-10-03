@@ -28,8 +28,14 @@ from profile_builder.agent.builder import (
     build_embeddings,
     build_model,
 )
+from profile_builder.agent.middleware import is_provider_rejection
 from profile_builder.agent.prompts import render_initial_message
-from profile_builder.agent.tools import FatalProfileError, ToolContext, finalize
+from profile_builder.agent.tools import (
+    FatalProfileError,
+    ToolContext,
+    finalize,
+    no_usable_pages_message,
+)
 from profile_builder.config import (
     DISCOVERY_FILENAME,
     MAX_FINALIZE_NUDGES,
@@ -61,6 +67,8 @@ log = get_logger("runner")
 
 EXIT_WORDS = frozenset({"exit", "quit", "q", ":q", "stop"})
 PAUSED = "paused"
+FINISHED_STATUSES = frozenset({"complete", "partial", "failed"})
+PROVIDER_REJECTED_PREFIX = "OpenAI rejected the request (check OPENAI_API_KEY / model id)"
 
 ModelFactory = Callable[[Settings], BaseChatModel]
 ScraperFactory = Callable[[Settings], Scraper]
@@ -130,6 +138,7 @@ class Runner:
         fixtures_dir: Path | None = None,
         save_fixtures_dir: Path | None = None,
         runs_dir_flag: str | None = None,
+        robots: RobotsChecker | None = None,
     ) -> None:
         self.settings = settings
         self.console = console or Console()
@@ -141,6 +150,8 @@ class Runner:
         self.check_dns = check_dns
         self.save_fixtures_dir = save_fixtures_dir
         self.runs_dir_flag = runs_dir_flag
+        # Injectable so offline tests never touch the network (robots.txt is fetched live).
+        self.robots = robots if robots is not None else RobotsChecker(enabled=True)
 
     # ---- public API ----------------------------------------------------------------
     def start(self, url: str, product: str | None = None) -> RunOutcome:
@@ -198,7 +209,25 @@ class Runner:
             kind="resume",
         )
         resuming_partial = run.status == "partial" and bool(clean_overrides)
-        if run.status in {"complete", "partial", "failed"} and not resuming_partial:
+        ctx, agent, config = self._build(
+            run_id, run_dir, store, run.start_url, run.product_focus, settings
+        )
+        snap = agent.get_state(config)
+        # A pending interrupt always wins over the stored status: a mid-run `export` or a
+        # crash while writing the status must never strand an unanswered question.
+        if snap.interrupts:
+            intr = snap.interrupts[0]
+            committed = self._committed_answer(store, intr.value)
+            if committed is not None:
+                # Crash after the answer was committed but before the checkpoint advanced:
+                # replay with the durable answer instead of asking again.
+                log.info("answer for %s already committed; not re-asking", intr.value.get("qid"))
+                return self._run(ctx, agent, config, Command(resume={intr.id: committed}))
+            answer = self._ask(intr.value)
+            if answer is None:
+                return self._paused(ctx)
+            return self._run(ctx, agent, config, Command(resume={intr.id: answer}))
+        if run.status in FINISHED_STATUSES and not resuming_partial:
             latest = store.latest_draft()
             render_summary(
                 self.console, store, latest[1] if latest else None, run.status, run.output_path
@@ -214,22 +243,6 @@ class Runner:
                 run.output_path,
                 message=f"run already finished with status {run.status}.{hint}",
             )
-        ctx, agent, config = self._build(
-            run_id, run_dir, store, run.start_url, run.product_focus, settings
-        )
-        snap = agent.get_state(config)
-        if snap.interrupts:
-            intr = snap.interrupts[0]
-            committed = self._committed_answer(store, intr.value)
-            if committed is not None:
-                # Crash after the answer was committed but before the checkpoint advanced:
-                # replay with the durable answer instead of asking again.
-                log.info("answer for %s already committed; not re-asking", intr.value.get("qid"))
-                return self._run(ctx, agent, config, Command(resume={intr.id: committed}))
-            answer = self._ask(intr.value)
-            if answer is None:
-                return self._paused(ctx)
-            return self._run(ctx, agent, config, Command(resume={intr.id: answer}))
         if snap.next:
             return self._run(ctx, agent, config, None)
         if resuming_partial:
@@ -259,10 +272,11 @@ class Runner:
                 ]
             }
             return self._run(ctx, agent, config, initial)
-        return self._finish(ctx, agent, config)
+        return self._guarded(ctx, lambda: self._finish(ctx, agent, config))
 
     def export(self, run_id: str) -> RunOutcome:
-        """Re-export from the latest saved draft without running the agent."""
+        """Re-export from the latest saved draft without running the agent. A run that is not
+        finished (paused / interrupted / running) keeps its status so `resume` still works."""
         validate_run_id(run_id)
         run_dir = safe_child(self.settings.runs_dir, run_id)
         if not (run_dir / "run.sqlite").exists():
@@ -279,20 +293,23 @@ class Runner:
             Settings.from_snapshot(run.settings),
             scraper=None,
         )
-        forced = run.status not in {"complete"}
+        unfinished = run.status not in FINISHED_STATUSES
+        forced = run.status != "complete"
         try:
-            summary = finalize(ctx, forced_partial=forced)
+            summary = finalize(ctx, forced_partial=forced, keep_status=unfinished)
         except FatalProfileError as exc:
             return RunOutcome(run_id, "failed", message=str(exc))
         latest = store.latest_draft()
+        status = run.status if unfinished else summary["status"]
         render_summary(
-            self.console,
-            store,
-            latest[1] if latest else None,
-            summary["status"],
-            summary["output_path"],
+            self.console, store, latest[1] if latest else None, status, summary["output_path"]
         )
-        return RunOutcome(run_id, summary["status"], summary["output_path"])
+        return RunOutcome(
+            run_id,
+            status,
+            summary["output_path"],
+            resume_hint=self._resume_cmd(run_id) if unfinished else None,
+        )
 
     # ---- internals -----------------------------------------------------------------
     def _attach_logging(self, run_id: str, run_dir: Path) -> None:
@@ -326,7 +343,7 @@ class Runner:
             store=store,
             scraper=scraper,  # type: ignore[arg-type]
             index=index,
-            robots=RobotsChecker(enabled=True),
+            robots=self.robots,
             run_dir=run_dir,
             run_id=run_id,
             start_url=start_url,
@@ -393,7 +410,8 @@ class Runner:
         self, ctx: ToolContext, agent: Any, config: dict[str, Any], initial: Any
     ) -> RunOutcome:
         ctx.store.set_status("running")
-        try:
+
+        def loop() -> RunOutcome:
             result = agent.invoke(initial, config, durability="sync")
             while True:
                 interrupts = result.get("__interrupt__") or []
@@ -405,11 +423,23 @@ class Runner:
                     return self._paused(ctx)
                 result = agent.invoke(Command(resume={intr.id: answer}), config, durability="sync")
             return self._finish(ctx, agent, config)
+
+        return self._guarded(ctx, loop)
+
+    def _guarded(self, ctx: ToolContext, fn: Callable[[], RunOutcome]) -> RunOutcome:
+        """Every path that drives the agent or finalizes ends in exactly one outcome:
+        failed (fatal profile error / provider rejection), paused (Ctrl-C) or interrupted
+        (anything unexpected; state kept, resumable)."""
+        try:
+            return fn()
         except FatalProfileError as exc:
             return self._failed(ctx, str(exc))
         except KeyboardInterrupt:
             return self._paused(ctx)
-        except Exception as exc:  # unexpected: keep the run resumable, report clearly
+        except Exception as exc:
+            if is_provider_rejection(exc):
+                return self._failed(ctx, f"{PROVIDER_REJECTED_PREFIX}: {exc}")
+            # unexpected: keep the run resumable, report clearly
             log.error("run interrupted by error: %s: %s", type(exc).__name__, exc, exc_info=True)
             ctx.store.set_status("interrupted")
             ctx.store.add_warning(
@@ -458,8 +488,15 @@ class Runner:
             )
             limit_hit = True
         budget = self.settings.budget_usd
+        resume_hint: str | None = None
         if budget is not None and store.total_cost() >= budget:
             limit_hit = True
+            resume_hint = f"{self._resume_cmd(run.run_id)} --budget-usd {budget * 2:.2f}"
+        elif limit_hit:
+            # The model-call cap derives from pages + questions; more questions raise it.
+            resume_hint = (
+                f"{self._resume_cmd(run.run_id)} --max-questions {self.settings.max_questions + 2}"
+            )
         if not limit_hit and store.get_counter("finalize_nudges") < MAX_FINALIZE_NUDGES:
             store.increment_counter("finalize_nudges")
             log.info("agent stopped without finalizing; nudging once")
@@ -471,17 +508,43 @@ class Runner:
                 ]
             }
             return self._run(ctx, agent, config, nudge)
+        if not store.fetched_urls():
+            # Nothing could be fetched: say so loudly; export only what the interview gave.
+            message, details = no_usable_pages_message(store)
+            store.add_warning("NO_USABLE_PAGES", message, details)
+            event(log, "warning", message, level=logging.WARNING, code="NO_USABLE_PAGES")
+            self.console.print(f"[bold yellow]Warning:[/bold yellow] {safe_text(message, 600)}")
+            if store.latest_draft() is None:
+                return self._failed(ctx, f"{message}; no draft exists, nothing to export")
         try:
             summary = finalize(ctx, forced_partial=True)
         except FatalProfileError as exc:
             return self._failed(ctx, f"stopped before a valid draft existed ({exc})")
-        return self._done(ctx, summary["status"], summary["output_path"])
+        if resume_hint:
+            self.console.print(
+                "[dim]The run was cut short by a limit; raise it and continue with:[/dim]"
+            )
+        return self._done(ctx, summary["status"], summary["output_path"], resume_hint=resume_hint)
 
-    def _done(self, ctx: ToolContext, status: str, output_path: str | None) -> RunOutcome:
+    def _done(
+        self,
+        ctx: ToolContext,
+        status: str,
+        output_path: str | None,
+        *,
+        resume_hint: str | None = None,
+    ) -> RunOutcome:
         self._maybe_save_fixtures(ctx)
         latest = ctx.store.latest_draft()
-        render_summary(self.console, ctx.store, latest[1] if latest else None, status, output_path)
-        return RunOutcome(ctx.run_id, status, output_path)
+        render_summary(
+            self.console,
+            ctx.store,
+            latest[1] if latest else None,
+            status,
+            output_path,
+            resume_hint=f"Continue with:\n  {resume_hint}" if resume_hint else None,
+        )
+        return RunOutcome(ctx.run_id, status, output_path, resume_hint=resume_hint)
 
     def _failed(self, ctx: ToolContext, message: str) -> RunOutcome:
         message = redact_text(message)

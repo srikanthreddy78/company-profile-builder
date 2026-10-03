@@ -137,11 +137,15 @@ class HybridIndex:
         self._token_sets: list[set[str]] = []
         self._bm25: BM25Okapi | None = None
         self._matrix: np.ndarray | None = None
+        self._matrix_rows: list[int] = []  # chunk positions that have an embedding
+        self.last_embedding_error: str | None = None  # set by the last index_page call
 
     # ---- indexing ------------------------------------------------------------------
     def index_page(self, url: str, markdown: str, *, title: str = "") -> tuple[int, int]:
         """Chunk + store a page, dropping paragraphs already seen on *other* pages (shared
-        nav/footers) and chunks whose text repeats elsewhere. Returns (chunks_kept, dropped)."""
+        nav/footers) and chunks whose text repeats elsewhere. Returns (chunks_kept, dropped).
+        An embedding-provider failure never aborts indexing: the page is stored BM25-only and
+        `last_embedding_error` carries the reason for the caller to warn about."""
         known = self.store.paragraph_hashes(exclude_url=url)
         chunks, dropped_paragraphs = chunk_markdown(
             markdown, page_title=title, known_paragraphs=known
@@ -150,18 +154,24 @@ class HybridIndex:
         kept = [c for c in chunks if c.text_hash not in foreign_chunks]
         dropped = dropped_paragraphs + (len(chunks) - len(kept))
         vectors: list[np.ndarray | None] = [None] * len(kept)
+        self.last_embedding_error = None
         if self.embeddings is not None and kept:
             texts = [c.text for c in kept]
-            embedded = self.embeddings.embed_documents(texts)
-            vectors = [np.asarray(v, dtype=np.float32) for v in embedded]
-            approx_tokens = sum(len(t) for t in texts) // CHARS_PER_TOKEN
-            self.store.add_usage(
-                "embedding",
-                self.embedding_model,
-                approx_tokens,
-                0,
-                estimate_cost_usd(self.embedding_model, {"input_tokens": approx_tokens}),
-            )
+            try:
+                embedded = self.embeddings.embed_documents(texts)
+                vectors = [np.asarray(v, dtype=np.float32) for v in embedded]
+            except Exception as exc:
+                self.last_embedding_error = f"{type(exc).__name__}: {str(exc)[:200]}"
+                log.warning("embedding failed for %s; keyword index only: %s", url, exc)
+            else:
+                approx_tokens = sum(len(t) for t in texts) // CHARS_PER_TOKEN
+                self.store.add_usage(
+                    "embedding",
+                    self.embedding_model,
+                    approx_tokens,
+                    0,
+                    estimate_cost_usd(self.embedding_model, {"input_tokens": approx_tokens}),
+                )
         self.store.replace_chunks(
             url, [(i, c.heading, c.text, c.text_hash, vectors[i]) for i, c in enumerate(kept)]
         )
@@ -180,14 +190,19 @@ class HybridIndex:
             corpus = [tokenize(c.text) or ["_"] for c in self._chunks]
             self._token_sets = [set(toks) for toks in corpus]
             self._bm25 = BM25Okapi(corpus) if corpus else None
-            vecs = [c.embedding for c in self._chunks]
-            if vecs and all(v is not None for v in vecs):
-                mat = np.vstack([v for v in vecs if v is not None])
+            # Pages indexed while the embedding provider was down have no vectors; they
+            # still take part in BM25 and are simply absent from the cosine ranking.
+            rows = [i for i, c in enumerate(self._chunks) if c.embedding is not None]
+            dims = {int(self._chunks[i].embedding.shape[0]) for i in rows}  # type: ignore[union-attr]
+            if rows and len(dims) == 1:
+                mat = np.vstack([self._chunks[i].embedding for i in rows])
                 norms = np.linalg.norm(mat, axis=1, keepdims=True)
                 norms[norms == 0] = 1.0
                 self._matrix = mat / norms
+                self._matrix_rows = rows
             else:
                 self._matrix = None
+                self._matrix_rows = []
         return self._chunks
 
     # ---- search --------------------------------------------------------------------
@@ -209,11 +224,16 @@ class HybridIndex:
             rankings.append(matched[: k * 3])
 
         if self.embeddings is not None and self._matrix is not None:
-            q = np.asarray(self.embeddings.embed_query(query), dtype=np.float32)
-            qn = float(np.linalg.norm(q))
+            try:
+                q = np.asarray(self.embeddings.embed_query(query), dtype=np.float32)
+            except Exception as exc:
+                log.warning("query embedding failed; keyword ranking only: %s", exc)
+                q = np.zeros(0, dtype=np.float32)
+            qn = float(np.linalg.norm(q)) if q.size == self._matrix.shape[1] else 0.0
             if qn:
-                sims = self._matrix @ (q / qn)
-                emb = sorted(idxs, key=lambda i: float(sims[i]), reverse=True)
+                sims_rows = self._matrix @ (q / qn)
+                sims = dict(zip(self._matrix_rows, sims_rows.tolist(), strict=True))
+                emb = sorted((i for i in idxs if i in sims), key=lambda i: sims[i], reverse=True)
                 rankings.append(emb[: k * 3])
 
         fused: dict[int, float] = {}

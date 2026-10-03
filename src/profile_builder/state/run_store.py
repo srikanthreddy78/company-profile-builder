@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -83,7 +85,7 @@ CREATE TABLE IF NOT EXISTS questions (
   question TEXT NOT NULL,
   why_unclear TEXT,
   field_paths_json TEXT NOT NULL,
-  status TEXT NOT NULL,            -- pending | answered | skipped | unknown
+  status TEXT NOT NULL,            -- pending | answered | skipped | unknown | preset
   answer TEXT,
   asked_at REAL NOT NULL,
   answered_at REAL
@@ -100,7 +102,7 @@ CREATE TABLE IF NOT EXISTS conflicts (
   field_path TEXT PRIMARY KEY,
   claims_json TEXT NOT NULL,
   summary TEXT,
-  status TEXT NOT NULL DEFAULT 'open',   -- open | resolved
+  status TEXT NOT NULL DEFAULT 'open',   -- open | resolved | omitted
   resolution TEXT,
   created_at REAL NOT NULL
 );
@@ -164,6 +166,33 @@ class ChunkRecord:
     embedding: np.ndarray | None
 
 
+def shifted_path(path: str, base: str, removed_index: int) -> str | None:
+    """Where `path` points after list item `removed_index` of `base` was deleted: unchanged
+    when unaffected, renumbered when past the removed item, None when it was the item."""
+    prefix = base + "["
+    if not path.startswith(prefix):
+        return path
+    idx_str, _, tail = path[len(prefix) :].partition("]")
+    if not idx_str.isdigit():
+        return path
+    idx = int(idx_str)
+    if idx == removed_index:
+        return None
+    if idx > removed_index:
+        return f"{base}[{idx - 1}]{tail}"
+    return path
+
+
+def shift_path_set(paths: set[str], base: str, removed_index: int) -> set[str]:
+    """Pure counterpart of `RunStore.shift_list_paths` for in-memory evidence path sets."""
+    out: set[str] = set()
+    for p in paths:
+        shifted = shifted_path(p, base, removed_index)
+        if shifted is not None:
+            out.add(shifted)
+    return out
+
+
 class RunStore:
     def __init__(self, run_dir: Path) -> None:
         self.run_dir = run_dir
@@ -171,6 +200,7 @@ class RunStore:
         run_dir.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
+        self._txn_depth = 0
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
@@ -186,6 +216,41 @@ class RunStore:
 
     def close(self) -> None:
         self._conn.close()
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Group writes into one SQLite transaction on the autocommit connection. Nested
+        calls join the outermost transaction; any exception rolls everything back."""
+        if self._txn_depth > 0:
+            self._txn_depth += 1
+            try:
+                yield
+            finally:
+                self._txn_depth -= 1
+            return
+        self._conn.execute("BEGIN")
+        self._txn_depth = 1
+        try:
+            yield
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
+        else:
+            self._conn.execute("COMMIT")
+        finally:
+            self._txn_depth = 0
+
+    # ---- meta ----------------------------------------------------------------------
+    def get_meta(self, key: str) -> str | None:
+        row = self._conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        self._conn.execute(
+            "INSERT INTO meta(key, value) VALUES (?,?)"
+            " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
 
     # ---- run -----------------------------------------------------------------------
     def create_run(
@@ -230,6 +295,10 @@ class RunStore:
             " output_path=COALESCE(?, output_path)",
             (status, time.time(), finished, output_path),
         )
+
+    def set_output_path(self, output_path: str) -> None:
+        """Record where outputs were written without touching the run status (mid-run export)."""
+        self._conn.execute("UPDATE run SET output_path=?, updated_at=?", (output_path, time.time()))
 
     def set_product_focus(self, product: str) -> None:
         self._conn.execute("UPDATE run SET product_focus=?, updated_at=?", (product, time.time()))
@@ -311,30 +380,39 @@ class RunStore:
         return int(row["n"])
 
     def shift_list_paths(self, base: str, removed_index: int) -> None:
-        """After deleting list item `removed_index` of `base`, drop evidence/conflict rows that
-        pointed at it and renumber rows pointing past it, so paths keep meaning."""
-        for table in ("evidence", "conflicts"):
-            rows = self._conn.execute(
-                f"SELECT rowid AS rid, field_path FROM {table} WHERE field_path LIKE ?",
-                (base + "[%",),
-            ).fetchall()
-            for r in rows:
-                rest = r["field_path"][len(base) + 1 :]
-                idx_str, _, tail = rest.partition("]")
-                if not idx_str.isdigit():
-                    continue
-                idx = int(idx_str)
-                if idx == removed_index:
-                    if table == "evidence":  # conflicts stay as a record of what was omitted
-                        self._conn.execute(
-                            f"DELETE FROM {table} WHERE rowid=?",
-                            (r["rid"],),
-                        )
-                elif idx > removed_index:
-                    self._conn.execute(
-                        f"UPDATE {table} SET field_path=? WHERE rowid=?",
-                        (f"{base}[{idx - 1}]{tail}", r["rid"]),
-                    )
+        """After deleting list item `removed_index` of `base`, drop evidence rows that pointed
+        at it and renumber rows pointing past it, so paths keep meaning. Conflict rows are a
+        record of what was disputed: only *open* ones are renumbered, and never onto a path
+        that already exists (the table's primary key)."""
+        rows = self._conn.execute(
+            "SELECT rowid AS rid, field_path FROM evidence WHERE field_path LIKE ?",
+            (base + "[%",),
+        ).fetchall()
+        for r in rows:
+            shifted = shifted_path(r["field_path"], base, removed_index)
+            if shifted is None:
+                self._conn.execute("DELETE FROM evidence WHERE rowid=?", (r["rid"],))
+            elif shifted != r["field_path"]:
+                self._conn.execute(
+                    "UPDATE evidence SET field_path=? WHERE rowid=?", (shifted, r["rid"])
+                )
+        conflicts = self._conn.execute(
+            "SELECT field_path FROM conflicts WHERE status='open' AND field_path LIKE ?",
+            (base + "[%",),
+        ).fetchall()
+        for r in conflicts:
+            shifted = shifted_path(r["field_path"], base, removed_index)
+            if shifted is None or shifted == r["field_path"]:
+                continue
+            exists = self._conn.execute(
+                "SELECT 1 FROM conflicts WHERE field_path=?", (shifted,)
+            ).fetchone()
+            if exists:
+                continue  # keep the row as is rather than clobbering another conflict record
+            self._conn.execute(
+                "UPDATE conflicts SET field_path=? WHERE field_path=?",
+                (shifted, r["field_path"]),
+            )
 
     def set_conflict_status(self, field_path: str, status: str, resolution: str) -> None:
         self._conn.execute(
@@ -474,13 +552,6 @@ class RunStore:
             (field_path, kind, source_url, excerpt, question_id, answer, time.time()),
         )
 
-    def supersede_evidence(self, field_path: str, kind: str = "website") -> int:
-        cur = self._conn.execute(
-            "UPDATE evidence SET superseded=1 WHERE field_path=? AND kind=? AND superseded=0",
-            (field_path, kind),
-        )
-        return cur.rowcount
-
     def supersede_evidence_tree(self, field_path: str) -> dict[str, int]:
         """Mark evidence for `field_path` and its descendants as stale (value changed).
         Returns counts per kind so callers can warn about replaced website claims."""
@@ -542,7 +613,7 @@ class RunStore:
 
     def questions_asked(self) -> int:
         return self._conn.execute(
-            "SELECT COUNT(*) AS n FROM questions WHERE status<>'pending'"
+            "SELECT COUNT(*) AS n FROM questions WHERE status NOT IN ('pending','preset')"
         ).fetchone()["n"]
 
     def pending_question(self) -> dict[str, Any] | None:
@@ -581,7 +652,7 @@ class RunStore:
         self._conn.execute(
             """INSERT INTO conflicts(field_path, claims_json, summary, created_at) VALUES (?,?,?,?)
                ON CONFLICT(field_path) DO UPDATE SET claims_json=excluded.claims_json,
-                 summary=excluded.summary""",
+                 summary=excluded.summary, status='open', resolution=NULL""",
             (field_path, json.dumps(claims), summary, time.time()),
         )
 
