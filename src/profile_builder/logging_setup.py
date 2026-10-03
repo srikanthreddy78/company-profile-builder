@@ -96,6 +96,8 @@ class RedactSecretsFilter(logging.Filter):
         return redact_text(text)
 
     def filter(self, record: logging.LogRecord) -> bool:
+        # Format first, then redact: secrets may live in args, and clearing args stops handlers
+        # from formatting the (now literal) message a second time.
         with contextlib.suppress(Exception):  # never break logging
             record.msg = self.redact(str(record.getMessage()))
             record.args = ()

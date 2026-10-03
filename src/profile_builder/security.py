@@ -122,6 +122,8 @@ def normalize_for_match(text: str) -> str:
 def excerpt_in_page(excerpt: str, page_text: str) -> bool:
     """True if `excerpt` is a verbatim (whitespace/markdown-normalized) substring of the page."""
     needle = normalize_for_match(excerpt)
+    # Below 8 normalized chars nearly anything is a substring of something; this guards direct
+    # callers such as note_conflict, the tools enforce the larger MIN_EXCERPT_CHARS themselves.
     if len(needle) < 8:
         return False
     return needle in normalize_for_match(page_text)

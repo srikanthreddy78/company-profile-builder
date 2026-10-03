@@ -194,6 +194,8 @@ class HybridIndex:
             # still take part in BM25 and are simply absent from the cosine ranking.
             rows = [i for i, c in enumerate(self._chunks) if c.embedding is not None]
             dims = {int(self._chunks[i].embedding.shape[0]) for i in rows}  # type: ignore[union-attr]
+            # Mixed dimensions (embedding model changed on resume) cannot be stacked; the cosine
+            # ranking is then disabled and search runs on BM25 alone.
             if rows and len(dims) == 1:
                 mat = np.vstack([self._chunks[i].embedding for i in rows])
                 norms = np.linalg.norm(mat, axis=1, keepdims=True)
@@ -236,6 +238,8 @@ class HybridIndex:
                 emb = sorted((i for i in idxs if i in sims), key=lambda i: sims[i], reverse=True)
                 rankings.append(emb[: k * 3])
 
+        # Reciprocal rank fusion: BM25 and cosine scores live on different scales, so only
+        # ranks are combined; RRF_K damps the top ranks so neither list can dominate alone.
         fused: dict[int, float] = {}
         for ranking in rankings:
             for rank, i in enumerate(ranking):

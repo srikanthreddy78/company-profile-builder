@@ -28,6 +28,8 @@ USER_AGENT = f"{APP_NAME}/{APP_VERSION} (+https://github.com/srikanth/company-pr
 MODEL_CALL_BASE = 20  # model calls for discovery/selection/drafting overhead
 MODEL_CALLS_PER_PAGE = 3
 MODEL_CALLS_PER_QUESTION = 4
+# Assumed average batch size for deriving max_scrape_calls; the hard per-call cap is
+# MAX_URLS_PER_SCRAPE_CALL below.
 PAGES_PER_SCRAPE_CALL = 3  # scrape_pages accepts several URLs per call
 
 # Retry/backoff (used by ToolRetry + ModelRetry middleware) ----------------------------

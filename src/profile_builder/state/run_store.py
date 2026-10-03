@@ -200,6 +200,8 @@ class RunStore:
         self.run_dir = run_dir
         self.path = run_dir / RUN_DB
         run_dir.mkdir(parents=True, exist_ok=True)
+        # check_same_thread=False: tools run in worker threads. isolation_level=None is
+        # autocommit, so transaction() owns BEGIN/COMMIT instead of sqlite3's implicit ones.
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         self._txn_depth = 0
@@ -373,6 +375,8 @@ class RunStore:
         """Distinct URLs for which a live scrape returned *something*: successful pages,
         duplicates/empties, off-site redirects and permanent failures. Transient failures,
         robots skips and guard rejections did not consume a scrape."""
+        # Mirrors is_transient_code(): the fixed codes go in the IN list, the open-ended
+        # HTTP_5xx family needs the LIKE.
         transient = sorted(TRANSIENT_CODES)
         placeholders = ",".join("?" for _ in transient)
         row = self._conn.execute(
@@ -515,6 +519,8 @@ class RunStore:
     def _subtree_clause(field_path: str) -> tuple[str, tuple[str, str, str]]:
         """SQL predicate (and its params) matching `field_path`, its list items and its
         feature subfields."""
+        # "_" is a LIKE wildcard, which is harmless here: every stored path comes from the fixed
+        # contract vocabulary, so no two paths differ only at an underscore.
         return (
             "(field_path=? OR field_path LIKE ? OR field_path LIKE ?)",
             (field_path, field_path + "[%", field_path + ".%"),
@@ -554,6 +560,7 @@ class RunStore:
         question_id: str | None = None,
         answer: str | None = None,
     ) -> None:
+        # NULL never equals NULL in SQL, so nullable columns are compared through IFNULL(..., '').
         exists = self._conn.execute(
             "SELECT 1 FROM evidence WHERE field_path=? AND kind=? AND IFNULL(source_url,'')=IFNULL(?,'')"
             " AND IFNULL(excerpt,'')=IFNULL(?,'') AND IFNULL(question_id,'')=IFNULL(?,'') AND superseded=0",

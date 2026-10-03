@@ -88,6 +88,8 @@ def _split_long(text: str, max_chars: int, overlap: int) -> list[str]:
 
 def paragraph_hashes(markdown: str) -> set[str]:
     md = _clean_markdown(markdown or "")
+    # Paragraph boundaries must match chunk_markdown's (blank-line separated, heading lines
+    # removed) for cross-page hashes to line up.
     body = "\n".join(line for line in md.splitlines() if not _HEADING_RE.match(line.strip()))
     return {
         text_hash(p)

@@ -35,6 +35,8 @@ def _default_resolver(host: str) -> list[str]:
 
 
 def _is_public_ip(ip_str: str) -> bool:
+    # Drop an IPv6 zone id (fe80::1%eth0) and unwrap IPv4-mapped addresses (::ffff:10.0.0.1),
+    # which would otherwise be judged as IPv6 and pass the private-range checks.
     ip = ipaddress.ip_address(ip_str.split("%")[0])
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped
@@ -102,6 +104,7 @@ def registrable_domain(host: str) -> str:
         return host
     if ".".join(parts[-2:]) in MULTI_TENANT_SUFFIXES:
         return ".".join(parts[-3:])
+    # "co.uk", "com.au", "ac.jp": a generic label before a two-letter country code.
     second_level = {"co", "com", "org", "net", "gov", "edu", "ac"}
     if parts[-2] in second_level and len(parts[-1]) == 2:
         return ".".join(parts[-3:])
@@ -187,6 +190,8 @@ def _validate_url(url: str, *, resolver: Resolver | None, check_dns: bool) -> st
             raise URLGuardError(f"IP address {literal_ip} is not publicly routable")
         return normalize_url(url)
 
+    # Resolution happens again at fetch time (robots.txt locally, pages via Firecrawl), so this
+    # rejects hosts that are internal now; it cannot rule out rebinding between check and fetch.
     if check_dns:
         resolve = resolver or _default_resolver
         addresses = resolve(host)

@@ -118,6 +118,8 @@ def merge_with_previous_draft(ctx: ToolContext, clean: dict[str, Any]) -> MergeR
     _, prev = previous
     for base in MERGEABLE_BASES:
         new_val, old_val = get_by_path(clean, base), get_by_path(prev, base)
+        # The previous draft already holds the user's value (apply_profile_updates saved it),
+        # so restoring old_val restores the answer.
         if base in result.user_bases and new_val != old_val:
             set_by_path(clean, base, copy.deepcopy(old_val))
             result.protected_by_user.append(base)
@@ -142,6 +144,8 @@ def thin_draft_advice(
     fetched = ctx.store.fetched_urls()
     if not fetched:
         return None
+    # strict (finalize): only a completely empty guarded section blocks the export. "company"
+    # is never thin-checked: it holds only the name and the URL the run was started with.
     threshold = 0 if strict else THIN_DRAFT_SECTION_FIELDS
     sections = FINALIZE_GUARD_SECTIONS if strict else None
     thin = [

@@ -197,6 +197,8 @@ def make_web_tools(ctx: ToolContext) -> list[Any]:
                 }
             )
             requested = requested[:MAX_URLS_PER_SCRAPE_CALL]
+        # Two caps: the page budget counts unique pages that returned something; the attempt
+        # cap counts every live fetch, so a site that times out forever cannot burn retries.
         max_attempts = settings.max_pages * SCRAPE_ATTEMPTS_PER_PAGE
         for raw in requested:
             try:

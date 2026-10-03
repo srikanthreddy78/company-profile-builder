@@ -243,6 +243,8 @@ class Runner:
                 run.output_path,
                 message=f"run already finished with status {run.status}.{hint}",
             )
+        # A checkpoint with pending nodes (the process died or an error stopped it mid-step):
+        # invoke(None) continues from the checkpoint without injecting new input.
         if snap.next:
             return self._run(ctx, agent, config, None)
         if resuming_partial:
@@ -258,10 +260,13 @@ class Runner:
                 ]
             }
             return self._run(ctx, agent, config, nudge)
+        # No checkpoint at all (stopped before the first step completed): start from scratch.
         if not snap.values:
             return self._run(
                 ctx, agent, config, _initial_input(run.start_url, run.product_focus, settings)
             )
+        # The graph ran to completion but the run status was never finalized (e.g. killed during
+        # the export): go straight to the finish logic, which nudges once or exports what exists.
         return self._guarded(ctx, lambda: self._finish(ctx, agent, config))
 
     def export(self, run_id: str) -> RunOutcome:
@@ -279,6 +284,8 @@ class Runner:
             Settings.from_snapshot(run.settings),
             scraper=None,
         )
+        # Anything not already complete is exported as partial: a re-export cannot know whether
+        # the agent would have finished.
         unfinished = run.status not in FINISHED_STATUSES
         forced = run.status != "complete"
         try:
@@ -403,6 +410,8 @@ class Runner:
         ctx.store.set_status("running")
 
         def loop() -> RunOutcome:
+            # durability="sync": the checkpoint is written before the next step starts, so it never
+            # lags more than one step behind the RunStore and replay after a crash is bounded.
             result = agent.invoke(initial, config, durability="sync")
             while True:
                 interrupts = result.get("__interrupt__") or []

@@ -253,6 +253,8 @@ def set_by_path(data: dict[str, Any], path: str, value: Any) -> None:
     lst = container[key]
     if not isinstance(lst, list):
         raise FieldPathError(f"{base} is not a list")
+    # index == len(lst) appends (the "[len]" convention of apply_profile_updates); anything past
+    # that is an error so a typo cannot create holes.
     if index is not None and index > len(lst):
         raise FieldPathError(f"index {index} out of range for {base} (len={len(lst)})")
     if sub is None:

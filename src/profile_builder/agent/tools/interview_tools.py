@@ -1,5 +1,5 @@
 """Interview tool: `ask_user`. Everything before the interrupt is idempotent so a resumed
-run replays safely; the answer commit and classification live in `agent.interview`."""
+run replays safely; answer classification lives in `agent.interview`; the commit happens here, right after the interrupt returns."""
 
 from __future__ import annotations
 
@@ -67,6 +67,7 @@ def make_interview_tools(ctx: ToolContext) -> list[Any]:
         existing = store.get_question(qid)
         if existing and existing["status"] != "pending":
             # Replay after a crash: the answer is already committed; never re-ask.
+            # "preset" is a store-internal status; the model only ever sees "answered".
             status = "answered" if existing["status"] == "preset" else existing["status"]
             return to_json(
                 answered_payload(
@@ -86,6 +87,8 @@ def make_interview_tools(ctx: ToolContext) -> list[Any]:
                     note="product focus was preset on the command line (not counted as a question)",
                 )
             )
+        # Checked after the replay/preset branches so a committed answer is always returned
+        # even when the cap was reached in the meantime.
         if store.questions_asked() >= settings.max_questions:
             if ctx.warn_once(
                 "LIMIT_QUESTIONS_REACHED", f"question limit of {settings.max_questions} reached"
@@ -105,6 +108,8 @@ def make_interview_tools(ctx: ToolContext) -> list[Any]:
                 }
             )
 
+        # The row is created as "pending" before the interrupt: questions_asked() ignores
+        # pending rows, so a crash while waiting for the answer does not consume the budget.
         record = store.upsert_question(qid, kind, question, why_unclear, paths)
         ctx.set_stage("interview")
         event(

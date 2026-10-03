@@ -159,6 +159,8 @@ def discover(
             if homepage_error is None
             else "no site map and the homepage could not be fetched; no pages are available"
         )
+    # The homepage is a candidate only when it could be fetched; otherwise it is also removed
+    # from the map's list so the model is not offered a page known to be unavailable.
     if homepage_error is None:
         raw.insert(0, LinkCandidate(url=start_url, title="Homepage"))
     candidates, dropped = filter_and_score(raw, start_url, check_dns=check_dns)

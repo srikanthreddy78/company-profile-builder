@@ -101,6 +101,8 @@ class RunTelemetryMiddleware(AgentMiddleware):
         self._model_attempts[key] = attempt
         t0 = time.perf_counter()
         status = "ok"
+        # GraphBubbleUp (interrupt/pause) subclasses Exception, so it must be caught first or the
+        # generic handler below would log a pause as a failed call.
         try:
             response = handler(request)
         except GraphBubbleUp:
@@ -184,6 +186,8 @@ class SerialToolCallsMiddleware(AgentMiddleware):
     the whole tools step and resume values are matched by position."""
 
     def wrap_model_call(self, request: ModelRequest, handler: Any) -> ModelResponse:
+        # model_settings become bind kwargs on the chat model; parallel_tool_calls is the OpenAI
+        # flag that stops the model from emitting several tool calls in one step.
         settings = dict(request.model_settings or {})
         settings["parallel_tool_calls"] = False
         return handler(request.override(model_settings=settings))
@@ -200,6 +204,8 @@ class BudgetCapMiddleware(AgentMiddleware):
 
     @hook_config(can_jump_to=["end"])
     def before_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+        # Spend is read from the store, not from graph state: it includes embedding calls and
+        # survives a resume, so a budget raised on resume takes effect immediately.
         spent = self.store.total_cost()
         if spent < self.budget_usd:
             return None
@@ -299,6 +305,8 @@ def build_middleware(settings: Settings, store: RunStore) -> list[AgentMiddlewar
             max_delay=RETRY_MAX_DELAY_S,
             backoff_factor=RETRY_BACKOFF_FACTOR,
         ),
+        # Untrusted framing is innermost so it wraps exactly what the tool returned; the retry
+        # middlewares outside it only ever see unframed exceptions.
         RunTelemetryMiddleware(store, settings.model_id),
         UntrustedContentMiddleware(),
     ]

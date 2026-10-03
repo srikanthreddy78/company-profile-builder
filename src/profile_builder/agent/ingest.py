@@ -164,6 +164,8 @@ def process_page(ctx: ToolContext, page: ScrapedPage, requested_url: str) -> dic
         http_status=page.http_status,
         links=[str(link) for link in (page.links or [])],
     )
+    # Order matters: cache file, then index rows, then the "fetched" page row. A crash in
+    # between leaves a cached-but-unrecorded page that discover/scrape replay re-processes.
     atomic_write_text(ctx.pages_dir / cache_name, stored.to_json())
     ctx._page_text_cache[url] = markdown
 
@@ -260,6 +262,8 @@ def fetch_live(ctx: ToolContext, url: str, *, pace: bool, with_links: bool = Fal
     asks for the page's links too (`with_links`) so they can seed the candidate list."""
     if pace and SCRAPE_INTER_REQUEST_DELAY_S > 0:
         time.sleep(SCRAPE_INTER_REQUEST_DELAY_S)
+    # Counted before the call: the attempt cap bounds spend, so a crash mid-fetch still costs
+    # one attempt (unlike the page budget, which only counts pages that returned something).
     ctx.store.increment_counter("scrape_attempts")
     try:
         page = ctx.scraper.scrape(

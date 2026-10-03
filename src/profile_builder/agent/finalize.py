@@ -222,6 +222,8 @@ def finalize(
         for base, index in shifts:
             store.shift_list_paths(base, index)
         output_path = write_outputs(ctx.run_dir, store, clean, status)
+        # The exported profile becomes the latest draft, so a later export or resume starts
+        # from what was published rather than from the pre-omission draft.
         store.save_draft(clean, "finalize")
         if keep_status:
             store.set_output_path(str(output_path))
