@@ -1,260 +1,256 @@
 # Company Profile Builder
 
-A Python CLI that turns a company website into a grounded `company_brain.json`: it discovers
-and reads the most relevant pages, drafts a profile against a fixed contract, finds the gaps
-and conflicts the website leaves open, interviews you in the terminal (one focused question
-at a time), and exports a validated profile with full evidence.
+Turn a company website and a short interview into a structured company profile.
 
-Built on the **Deep Agents SDK** (LangGraph runtime), **OpenAI** models and **Firecrawl**.
-Every claim in the output is tied to a verbatim excerpt of a fetched page or to one of your
-answers; the evidence lives next to the profile in `evidence.json`.
+The tool researches what the company sells, who it serves, and how it talks about its
+products. It then asks you about important details the website leaves unclear and saves
+the profile alongside its sources and your answers.
 
-Abridged from [`examples/fortanix/transcript.txt`](examples/fortanix/transcript.txt) (quality
-tier; `…` marks elided lines; the answer line is shown as typed, since the transcript does not
-echo piped input):
+Each run focuses on **one product**. By default, it scrapes up to **10 unique pages** and
+asks up to **5 questions**, including follow-ups. It can finish earlier when no useful
+questions remain.
 
-```
-$ uv run python -m profile_builder start --url https://www.fortanix.com/ --product "Confidential Computing Platform" --tier quality
-Run id: pb-20261002-lotlt2  (resume later with: python -m profile_builder resume
-INFO     stage → discover
-INFO     indexed https://www.fortanix.com/ (28985 chars, 20 chunks, 0 repeated
-INFO     30 candidates from map+homepage_links (24 dropped)
-INFO     stage → scrape
-INFO     indexed https://www.fortanix.com/platform/confidential-computing (49642
-INFO     indexed https://www.fortanix.com/platform (21363 chars, 9 chunks, 25
-…
-INFO     stage → research
-INFO     search_pages finished
-…
-INFO     stage → draft
-INFO     draft v1 saved (59 evidence rows, 1 rejected, 6 gaps)
-INFO     stage → interview
-╭──────────────────────────────── Question 1/5 ────────────────────────────────╮
-│ For the Confidential Computing Platform, who typically makes the buying      │
-│ decision on the customer side?                                               │
-│                                                                              │
-│ Why this is unclear: The website shows regulated-industry use cases and      │
-│ technical platform details, but it does not clearly identify the buyer roles │
-│ for this product.                                                            │
-│                                                                              │
-│ Affects: customer.buyers                                                     │
-│                                                                              │
-│ Answer, or type skip · idk · exit (save and resume later)                    │
-╰──────────────────────────────────────────────────────────────────────────────╯
-> CISO, CIO, Head of Data Security and Compliance, VP of Cloud Infrastructure
-…
-INFO     profile exported (complete) →
-╭────────────────────────── Company Profile Builder ───────────────────────────╮
-│ Run            pb-20261002-lotlt2                                            │
-│ Website        https://www.fortanix.com/                                     │
-│ Product focus  Confidential Computing Platform                               │
-│ Status         COMPLETE                                                      │
-│ Pages          10 fetched · 0 skipped · 0 failed                             │
-│ Questions      2 asked (max 5)                                               │
-│ Model          gpt-5.4 · 17 calls · 206,581 in / 5,866 out                   │
-│ Est. cost      $0.1973 (no budget cap)                                       │
-│ Output         /Users/srikanth/projects/company-profile-builder/.runs/pb-20… │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
-The committed example artifacts were produced by an earlier code version (before the
-per-list-item grounding rule and the `interview_only` field) and will be regenerated; the
-numbers above match the files as committed.
+Built with Python, Deep Agents, LangGraph, OpenAI, and Firecrawl.
 
 ## Quick start
 
-Requirements: Python 3.12+, [`uv`](https://docs.astral.sh/uv/), an OpenAI API key and a
-Firecrawl API key (Firecrawl's free tier is enough for a few runs).
+You need **Python 3.12+**, **uv**, and API keys for **OpenAI** and **Firecrawl** for a live run.
+After cloning this repository, run the following from its root directory:
 
 ```bash
-git clone <this repo> && cd company-profile-builder
-uv sync --extra dev                 # or: make install
-cp .env.example .env                # then put OPENAI_API_KEY and FIRECRAWL_API_KEY in .env
+uv sync --frozen
+cp .env.example .env
+```
+
+Open `.env` and replace the placeholder credentials:
+
+```dotenv
+OPENAI_API_KEY=your-openai-api-key
+FIRECRAWL_API_KEY=your-firecrawl-api-key
+```
+
+Check your configuration and provider connectivity:
+
+```bash
 uv run python -m profile_builder doctor
-uv run python -m profile_builder start --url https://www.fortanix.com/ --product "Confidential Computing Platform"
 ```
 
-During the interview type an answer, `skip`, `idk` (I don't know) or `exit` to save and leave.
-Resume any time:
+Start a profile for Fortanix's Confidential Computing Platform:
 
 ```bash
-uv run python -m profile_builder resume --run-id pb-20261002-k3x9qa
+uv run python -m profile_builder start \
+  --url https://www.fortanix.com/ \
+  --product "Confidential Computing Platform"
 ```
 
-Outputs land in `.runs/<run_id>/`: `company_brain.json` (the contract, nothing else),
-`evidence.json` (sources, excerpts, questions, warnings, conflicts, usage), `report.md`
-(coverage, gaps, pages, interview), `events.jsonl` and `run.log`. The JSON Schema of the
-contract is committed as `schema/company_brain.schema.json`; it marks every property as
-required at every level (unknown values are `""` / `[]`, never missing keys).
+The terminal shows progress, prints a run ID, and waits for your answers when needed.
+If you omit `--product` and the website offers several products, the agent is instructed
+to ask which one to focus on before drafting.
 
-An example Fortanix run (quality tier) is committed under [`examples/fortanix/`](examples/fortanix/)
-with its profile, evidence, report, logs and terminal transcript.
+## How a run works
 
-**Model tiers.** `fast` (`gpt-5-mini`, default) and `quality` (`gpt-5.4`). In live runs so far
-the fast tier completed a run for roughly $0.03–0.08 with more variance between runs; the
-quality tier cost about $0.15–0.25 (the committed example: $0.19) and grounded and phrased more
-consistently. Use `--tier quality` for a profile you intend to keep.
+```mermaid
+flowchart TD
+    A["Company website and optional product choice"] --> B["Discover and read relevant pages"]
+    B --> C["Research and draft a profile with evidence"]
+    C --> D{"Useful questions remain and question budget available?"}
+    D -->|Yes| E["Ask one focused question"]
+    E --> F["Record the answer and update the profile"]
+    F --> D
+    D -->|No| G["Validate and export profile, evidence, and report"]
+```
 
-## Commands
+The agent chooses pages that explain the product, customers, and company. It searches
+saved passages for relevant information, then interviews you about gaps, conflicting
+claims, or preferences that the website cannot settle.
 
-| Command | What it does |
+Your corrections take precedence over website claims. The original evidence is retained
+for review. Unresolved conflicts and values without accepted evidence are omitted from
+the final profile.
+
+## Answering questions and resuming
+
+An interview question might look like this:
+
+> **Question:** Who usually makes the buying decision for this product?
+>
+> **Why this is unclear:** The website describes customer industries but does not name buyer roles.
+>
+> **Your answer:** The CISO and Head of Data Security.
+
+Answer in your own words, or use one of these commands:
+
+| Input | What happens |
 |---|---|
-| `start --url URL [--product NAME] [options]` | New run. `--product` presets the product focus: the "which product?" question is recorded with status `preset` and does not count toward the question cap. |
-| `resume --run-id ID [--max-questions N] [--budget-usd X] [--non-interactive] [--fixtures DIR] [--runs-dir DIR]` | Continue from the last checkpoint; answered questions are never re-asked. A `partial` run continues only when `--max-questions` or `--budget-usd` is passed. |
-| `status --run-id ID` | Stage, status, counters, pending question, interview, warnings, cost. |
-| `inspect --run-id ID [--field PATH]` | Every populated field with its evidence (URL + verbatim excerpt, or Q&A). |
-| `export --run-id ID` | Re-export the three output files from the latest saved draft. For a paused / running / interrupted run the outputs are labeled `partial` but the run status is kept so `resume` still works. |
-| `logs --run-id ID [--tail N] [--level L] [--json]` | Structured event log of a run. |
-| `list` | All runs in the runs directory. |
-| `schema [--out PATH]` | JSON Schema generated from the Pydantic contract. |
-| `doctor` | Keys present, providers reachable, runs dir writable (never prints keys). Exits 1 if any check fails. |
+| `skip` | Leave this question unresolved and move on. |
+| `idk` or `I don't know` | Record that you do not know the answer and move on. |
+| `exit` | Save progress and leave the interview. |
 
-`start` options: `--max-pages N`, `--max-questions N`, `--model ID` / `--tier fast|quality`,
-`--budget-usd X`, `--no-embeddings`, `--non-interactive` (auto-skip questions, for demos/CI),
-`--fixtures DIR` (serve pages from saved fixtures instead of Firecrawl), `--save-fixtures DIR`,
-`--runs-dir DIR`.
+To check or continue a run, replace the placeholder below with the run ID printed in
+your terminal:
 
-Global options go **before** the subcommand: `-v/--verbose` (debug logging on the console) and
-`-q/--quiet` (warnings and errors only), e.g. `python -m profile_builder -v start --url …`.
+```bash
+RUN_ID="paste-your-run-id-here"
+uv run python -m profile_builder status --run-id "$RUN_ID"
+uv run python -m profile_builder resume --run-id "$RUN_ID"
+```
 
-## Configuration
+Resuming uses the saved answers and cached pages. Keep the `.runs/` directory between
+sessions. If you chose a custom `--runs-dir`, pass that same directory when resuming or
+inspecting the run.
 
-Precedence: CLI flag > environment variable > `.env` > default. Every limit is one variable;
-derived caps (model calls, scrape calls) follow it automatically.
+## Understanding the output
 
-| Variable | Flag | Default | Meaning |
-|---|---|---|---|
-| `PROFILE_BUILDER_MAX_PAGES` | `--max-pages` | 10 | Unique pages scraped per run |
-| `PROFILE_BUILDER_MAX_QUESTIONS` | `--max-questions` | 5 | Interview questions incl. follow-ups |
-| `PROFILE_BUILDER_TIER` / `PROFILE_BUILDER_MODEL` | `--tier` / `--model` | `fast` → `gpt-5-mini` | `quality` → `gpt-5.4`; `--model` takes any OpenAI id |
-| `PROFILE_BUILDER_EMBEDDING_MODEL` | — | `text-embedding-3-small` | Embedding model for hybrid retrieval |
-| `PROFILE_BUILDER_USE_EMBEDDINGS` | `--no-embeddings` | true | Hybrid BM25 + embeddings, or BM25 only |
-| `PROFILE_BUILDER_BUDGET_USD` | `--budget-usd` | unlimited | Stop cleanly at this estimated spend; the run stays resumable with a higher cap |
-| `PROFILE_BUILDER_SCRAPE_TIMEOUT_MS` | — | 30000 | Firecrawl timeout |
-| `PROFILE_BUILDER_MAX_RETRIES` | — | 2 | Retries after the first attempt (model and scrape) |
-| `PROFILE_BUILDER_RUNS_DIR` | `--runs-dir` | `.runs` | Where run state lives |
-| `OPENAI_API_KEY`, `FIRECRAWL_API_KEY` | — | required | Provider credentials (never passed as flags) |
+Files are saved under `.runs/<run_id>/`:
 
-Optional LangSmith tracing works through the standard `LANGSMITH_*` variables.
+| File | What to use it for |
+|---|---|
+| `company_brain.json` | The structured profile: company, product, customers, supporting content, and brand. |
+| `evidence.json` | Trace fields to page excerpts or interview answers; inspect warnings, conflicts, and usage. |
+| `report.md` | Read a human-friendly summary of coverage, questions, remaining gaps, and warnings. |
+| `events.jsonl` and `run.log` | Investigate what happened during the run. |
 
-### Exit codes
+Unknown strings are `""` and unknown collections are `[]`. Run metadata stays outside
+the profile so it follows the fixed [JSON Schema](schema/company_brain.schema.json).
 
-- `0` — run `complete` or `partial`, or paused by the user (`exit` / Ctrl-C during the interview).
-- `1` — run `failed`: invalid model output after the single repair attempt, no usable pages and
-  no draft, or OpenAI rejected the request (authentication / permission / bad-request / not-found
-  errors are not retried and are reported as
-  `OpenAI rejected the request (check OPENAI_API_KEY / model id)`). No profile is written.
-- `2` — usage or configuration error: start URL rejected by the guard, missing API key, run id
-  not found, invalid option. (`doctor` exits `1` when a check fails.)
-- `3` — stopped on an unexpected error; state is kept and the run is resumable with
-  `resume --run-id …` (exhausted transient model retries end here too).
+A **complete** run has finished its workflow; some fields may still be unknown. A
+**partial** result means the run was cut short or relied on the interview without usable
+website pages. Check the report for the reason and any remaining gaps.
 
-### What happens at the limits
+Evidence checks make claims traceable. They do not guarantee that a source is correct
+or that every interpretation is accurate; review the profile alongside its evidence.
 
-- **Page cap reached** — normal; the run finishes as `complete`. A single `LIMIT_PAGES_REACHED`
-  warning is recorded. URLs that did not fit are returned to the agent in the `scrape_pages`
-  result as `not_fetched` (`PAGE_BUDGET_EXHAUSTED`); they are not listed in the report.
-- **Question cap reached** — normal; `ask_user` returns `QUESTION_LIMIT`, a
-  `LIMIT_QUESTIONS_REACHED` warning is recorded and the run finishes as `complete`.
-- **Budget reached** — the budget middleware stops before the next model call
-  (`BUDGET_EXCEEDED`), the last valid draft is exported as `partial`, and the summary prints
-  `resume --run-id … --budget-usd <2 × budget>`.
-- **Model-call cap reached** (`20 + 3·pages + 4·questions`) — same as budget (`partial`,
-  `LIMIT_MODEL_CALLS_REACHED`); the hint is `resume --run-id … --max-questions <current + 2>`,
-  because more questions raise the derived cap.
-- **Resuming a `partial` run** continues from the checkpoint only when `--budget-usd` or
-  `--max-questions` is passed (recorded as `SETTINGS_OVERRIDDEN_ON_RESUME`); without an override
-  `resume` prints the summary and says the run already finished. A pending interview question
-  always takes precedence: `resume` asks it regardless of the stored status.
-- **Invalid model output** — one repair attempt; if it fails again the run is `failed`, state
-  is kept, and no profile is written. If an earlier valid draft exists the console shows how to
-  `export` it.
-- **No usable pages** — a `NO_USABLE_PAGES` warning lists every attempted URL with its
-  `error_code`. With no draft the run is `failed`; with a draft (interview-only) it is exported
-  as `partial` with `"interview_only": true` in `evidence.json`. Nothing is fabricated.
-- **Unexpected error** — status `interrupted`, exit code 3, `RUN_INTERRUPTED` warning, resume hint.
+Inspect a particular field from the terminal:
 
-## How it works
+```bash
+uv run python -m profile_builder inspect \
+  --run-id "$RUN_ID" --field customer.target_customer
+```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the tools / middleware / workflow split,
-persistence and the replay boundary, the context-engineering design and tradeoffs, and
-[SECURITY.md](SECURITY.md) for the threat model.
+For a saved Fortanix example, open the [profile](examples/fortanix/company_brain.json),
+[evidence](examples/fortanix/evidence.json), [report](examples/fortanix/report.md), or
+[terminal transcript](examples/fortanix/transcript.txt). The example's interview answers
+were supplied by the candidate as a proxy, rather than confirmed by Fortanix.
 
-In short: deterministic code discovers and pre-scores candidate pages; the agent picks ≤ 10,
-pages are cached, chunked (heading-aware, nav/footer de-duplicated across pages) and indexed;
-the agent gathers evidence through hybrid search rather than reading raw pages; drafts are
-validated with Pydantic and every evidence excerpt must be a verbatim quote of a fetched page
-that mentions the value it supports (list items are grounded one by one); gaps and conflicts
-are prioritized in code and the agent asks one focused question at a time via a LangGraph
-interrupt; answers are committed to SQLite before the graph advances and take precedence over
-anything the website says. At export, a populated field without accepted evidence (a verbatim
-page excerpt or a user answer) is omitted rather than shipped (`UNGROUNDED_OMITTED`), so every
-claim in `company_brain.json` is traceable in `evidence.json`.
+## Useful commands and settings
 
-## Docker
+Prefix each command below with `uv run python -m profile_builder`.
+`ID` stands for your saved run ID.
+
+| Command | Purpose |
+|---|---|
+| `start --url URL` | Start a new profile. |
+| `resume --run-id ID` | Continue a paused or interrupted run. |
+| `status --run-id ID` | Check progress, questions, warnings, and estimated cost. |
+| `inspect --run-id ID` | View populated fields and their supporting evidence. |
+| `export --run-id ID` | Rebuild output files from the latest saved draft without calling the agent. |
+| `logs --run-id ID --tail 20` | Read recent events. |
+| `list` | List saved runs. |
+| `schema` | Print the output's JSON Schema. |
+| `doctor` | Check configuration, provider connectivity, and the output directory. |
+
+Use `--help` after any command for its full options. Global `-v` (verbose) and `-q`
+(quiet) flags go before the command.
+
+These are the main options for `start`:
+
+| Option | Default | Purpose |
+|---|---|---|
+| `--product "Name"` | Ask if needed | Focus the run on one product. |
+| `--max-pages N` | 10 | Limit unique pages scraped. |
+| `--max-questions N` | 5 | Limit interview questions, including follow-ups. |
+| `--tier fast` or `--tier quality` | `fast` | Choose the configured model: `gpt-5-mini` or `gpt-5.4`. |
+| `--budget-usd X` | No cap | Stop before another model call once estimated spend reaches the cap. |
+| `--no-embeddings` | Embeddings enabled | Use keyword search alone. |
+| `--non-interactive` | Interactive | Automatically skip interview questions. |
+| `--runs-dir DIR` | `.runs` | Choose where to store progress and outputs. |
+
+`--model` overrides the tier with an explicit model ID. Budget estimates cover model and
+embedding usage; Firecrawl usage is separate. Checks occur between model calls, so a
+single call can take estimated spend above the cap.
+
+CLI flags override environment variables, then `.env`, then defaults.
+See [.env.example](.env.example) for all settings, including timeouts and optional tracing.
+
+## Design and reliability
+
+**Deep Agents and OpenAI** make research decisions: which pages to read, what information
+is missing, and which questions are useful. **Firecrawl** retrieves website content.
+The retrieval layer combines keyword and embedding search to return relevant passages
+without putting entire pages into every prompt.
+
+**Pydantic** validates the output structure. Evidence checks link individual values to
+cached page excerpts or recorded answers. **LangGraph and SQLite** save workflow progress,
+drafts, questions, and answers so a run can continue after interruption.
+
+Middleware handles retries, execution limits, and usage logging. URL guards and
+untrusted-content handling constrain what the agent can fetch and do.
+
+See [Architecture](ARCHITECTURE.md) for design decisions, persistence, and tradeoffs,
+and [Security](SECURITY.md) for safeguards and their limits.
+
+## Development and troubleshooting
+
+Install the development tools and run the checks:
+
+```bash
+uv sync --frozen --extra dev
+make test
+make lint
+```
+
+The tests use a scripted model and saved website fixtures, so they run offline without
+API keys. They cover the profile contract, evidence handling, corrections, limits,
+provider failures, and interruption/resume behavior.
+
+To try the CLI with saved Fortanix pages:
+
+```bash
+uv run python -m profile_builder start \
+  --url https://www.fortanix.com/ \
+  --product "Confidential Computing Platform" \
+  --fixtures tests/fixtures/fortanix
+```
+
+This replaces Firecrawl page fetching with local files. It still needs an OpenAI key and
+network access for model calls and URL/robots checks.
+
+| Situation | What to do |
+|---|---|
+| Missing key or provider rejection | Check `.env`, run `doctor`, and confirm your account can use the selected model. |
+| Paused or interrupted run | Check `status` and `logs`, then use `resume`. |
+| Partial result after a budget or model-call limit | Follow the printed resume hint, raising `--budget-usd` or `--max-questions` as appropriate. |
+| No usable website pages | Check the URL and page errors in the logs. A saved draft may still be exported as an interview-only partial result. |
+| Empty fields or omitted claims | Read the report and evidence warnings to see what could not be supported or resolved. |
+| Failed run with an earlier valid draft | Use `export --run-id ID` to recover that draft's supported contents. |
+
+A partial run normally needs an explicit budget or question-limit override to continue.
+An unfinished interview can still be resumed. Exporting an unfinished run labels its
+outputs partial and keeps the run resumable.
+
+For scripts, exit codes are `0` for complete, partial, or paused runs; `1` for a failed
+run; `2` for usage/configuration errors; and `3` for an interrupted run.
+`doctor` returns `1` when a check fails.
+
+<details>
+<summary>Optional: run with Docker</summary>
+
+On macOS or Linux, from the repository root with your configured `.env`:
 
 ```bash
 docker build -t profile-builder .
-docker run -it --user $(id -u):$(id -g) \
-  -e OPENAI_API_KEY -e FIRECRAWL_API_KEY \
+mkdir -p .runs
+docker run --rm -it --user "$(id -u):$(id -g)" \
+  --env-file .env -e PROFILE_BUILDER_RUNS_DIR=/runs \
   -v "$PWD/.runs:/runs" \
-  profile-builder start --url https://www.fortanix.com/ --product "Confidential Computing Platform"
+  profile-builder start --url https://www.fortanix.com/ \
+  --product "Confidential Computing Platform"
 ```
 
-`-it` is required for the interview (the agent waits for terminal input). Run state is written
-to `/runs` inside the container (`PROFILE_BUILDER_RUNS_DIR=/runs`), so mount a host directory
-there and pass `--user` so the files belong to you. Any subcommand works the same way, e.g.
-`… profile-builder resume --run-id pb-…`. The image runs as a non-root user (UID 10001) by default.
+The mounted directory keeps progress after the container exits. Use the same mount and
+replace `start ...` with `resume --run-id ID` to continue a run.
+Keep `-it` enabled for the interview.
 
-## Development
-
-```bash
-make test       # offline test suite (scripted model + fixture site; no keys needed)
-make lint       # ruff check + format check
-make schema     # regenerate schema/company_brain.schema.json
-make audit      # pip-audit (advisory: never fails the build)
-make docker     # docker build -t profile-builder .
-```
-
-Tests cover: settings precedence and derived limits; the output contract and JSON Schema (every
-property required); SSRF guard cases (private/loopback/link-local/IPv6/DNS-rebinding/userinfo/
-ports/redirects, including a redirect whose final URL is a private IP); secret redaction in logs
-and stored errors; chunking + hybrid search; a full scrape → interview → export run; a
-conflicting fact resolved by a user correction (original evidence preserved); 429/timeout
-followed by recovery with capped retries, 404 never retried, 5xx refetched later; the
-fetch-attempt budget and the 10-URLs-per-call cap; invalid model output with one repair then a
-clean failure (a crash replay of the same call does not count twice); OpenAI auth errors not
-retried and reported; an unexpected error leaving the run `interrupted` and resumable; exit
-during the interview and resume with a fresh Runner/agent instance over the same SQLite state
-without re-asking; a list excerpt grounding only the items it mentions; ungrounded fields and
-unresolved conflicts omitted at export with idempotent re-indexing; a failed output write rolling
-the store back; export of a paused run keeping its status; no usable pages → failed or
-interview-only partial; `--product` not counted as a question; the CLI commands and exit codes.
-
-Run a fixture-backed session without Firecrawl credits (the LLM is still real):
-
-```bash
-uv run python -m profile_builder start --url https://www.fortanix.com/ --fixtures tests/fixtures/fortanix --product "Confidential Computing Platform"
-```
-
-## Project layout
-
-```
-src/profile_builder/
-  cli.py                 typer commands            config.py        settings + internal constants
-  models.py              model tiers + prices      schema.py        company_brain contract + field paths
-  logging_setup.py       events.jsonl/run.log      security.py      run ids, paths, atomic writes, evidence checks
-  web/url_guard.py       SSRF guard                web/robots.py    robots.txt
-  web/scraper.py         Firecrawl + fixtures      web/discovery.py candidate discovery + scoring
-  retrieval/chunking.py  heading-aware chunks      retrieval/index.py  BM25 + embeddings + RRF
-  agent/tools/           the 9 tools (web, interview, draft groups)   agent/middleware.py middleware stack
-  agent/context.py       ToolContext + fatal error  agent/ingest.py     page caching/chunking/indexing
-  agent/evidence.py      evidence verification      agent/drafting.py   validate/merge/repair drafts
-  agent/interview.py     question ids + answers     agent/finalize.py   omission + atomic export
-  agent/prompts.py       system prompt             agent/builder.py  model/checkpointer/agent
-  state/run_store.py     SQLite run state          workflow/runner.py start/resume/interview loop
-  workflow/gaps.py       gap + grounding analysis  workflow/export.py / summary.py  outputs + terminal UI
-schema/company_brain.schema.json   examples/fortanix/   tests/
-```
+</details>
 
 License: MIT.
