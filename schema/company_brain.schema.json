@@ -1,0 +1,241 @@
+{
+  "$defs": {
+    "Brand": {
+      "additionalProperties": false,
+      "properties": {
+        "voice_and_tone": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Voice And Tone",
+          "type": "array"
+        },
+        "writing_style": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Writing Style",
+          "type": "array"
+        },
+        "preferred_terms": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Preferred Terms",
+          "type": "array"
+        },
+        "terms_or_claims_to_avoid": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Terms Or Claims To Avoid",
+          "type": "array"
+        }
+      },
+      "title": "Brand",
+      "type": "object"
+    },
+    "Company": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "website_url": {
+          "default": "",
+          "title": "Website Url",
+          "type": "string"
+        }
+      },
+      "title": "Company",
+      "type": "object"
+    },
+    "ContentEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "customer_stories": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Customer Stories",
+          "type": "array"
+        },
+        "company_expertise": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Company Expertise",
+          "type": "array"
+        },
+        "product_evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Product Evidence",
+          "type": "array"
+        },
+        "proprietary_insights_or_examples": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Proprietary Insights Or Examples",
+          "type": "array"
+        }
+      },
+      "title": "ContentEvidence",
+      "type": "object"
+    },
+    "Customer": {
+      "additionalProperties": false,
+      "properties": {
+        "target_customer": {
+          "default": "",
+          "title": "Target Customer",
+          "type": "string"
+        },
+        "buyers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Buyers",
+          "type": "array"
+        },
+        "users": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Users",
+          "type": "array"
+        },
+        "problems": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Problems",
+          "type": "array"
+        },
+        "use_cases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Use Cases",
+          "type": "array"
+        },
+        "desired_outcomes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Desired Outcomes",
+          "type": "array"
+        },
+        "existing_alternatives": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Existing Alternatives",
+          "type": "array"
+        }
+      },
+      "title": "Customer",
+      "type": "object"
+    },
+    "FeatureCapability": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "how_it_works": {
+          "default": "",
+          "title": "How It Works",
+          "type": "string"
+        },
+        "customer_benefit": {
+          "default": "",
+          "title": "Customer Benefit",
+          "type": "string"
+        }
+      },
+      "title": "FeatureCapability",
+      "type": "object"
+    },
+    "Product": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "positioning": {
+          "default": "",
+          "title": "Positioning",
+          "type": "string"
+        },
+        "features_and_capabilities": {
+          "items": {
+            "$ref": "#/$defs/FeatureCapability"
+          },
+          "title": "Features And Capabilities",
+          "type": "array"
+        },
+        "differentiators": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Differentiators",
+          "type": "array"
+        }
+      },
+      "title": "Product",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "artifact": {
+      "const": "company_brain",
+      "default": "company_brain",
+      "title": "Artifact",
+      "type": "string"
+    },
+    "version": {
+      "const": 1,
+      "default": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "company": {
+      "$ref": "#/$defs/Company"
+    },
+    "product": {
+      "$ref": "#/$defs/Product"
+    },
+    "customer": {
+      "$ref": "#/$defs/Customer"
+    },
+    "content_evidence": {
+      "$ref": "#/$defs/ContentEvidence"
+    },
+    "brand": {
+      "$ref": "#/$defs/Brand"
+    }
+  },
+  "title": "company_brain",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

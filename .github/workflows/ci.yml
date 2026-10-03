@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.13"
+      - run: uv python install 3.12
+      - run: uv sync --extra dev --frozen
+      - name: Lint
+        run: |
+          uv run ruff check src tests
+          uv run ruff format --check src tests
+      - name: Schema in sync
+        run: |
+          uv run python -m profile_builder schema --out /tmp/schema.json
+          diff -q /tmp/schema.json schema/company_brain.schema.json
+      - name: Tests (offline, no API keys)
+        run: uv run pytest -q
+      - name: Dependency audit (advisory)
+        run: uv run pip-audit --strict || echo "::warning::pip-audit reported findings"
